@@ -120,10 +120,11 @@ export default function Home() {
       <div id="menuOverlay" className="hidden fixed inset-0 bg-black bg-opacity-40 z-40"></div>
 
       {/* ✅ HERO */}
-      <section
-        id="home"
-        className="relative h-[70vh] md:h-screen flex flex-col justify-center items-center text-center bg-gradient-to-br from-blue-100 via-white to-blue-50 overflow-hidden"
-      >
+    <section
+  id="home"
+  className="relative min-h-[90vh] flex flex-col justify-center items-center text-center bg-gradient-to-br from-blue-100 via-white to-blue-50 overflow-hidden pt-28 md:pt-32"
+>
+
         <div className="absolute top-[-50px] left-[-50px] w-64 h-64 bg-blue-200 rounded-full opacity-30 animate-pulse"></div>
         <div className="absolute bottom-[-60px] right-[-60px] w-80 h-80 bg-blue-300 rounded-full opacity-20 animate-pulse"></div>
 
