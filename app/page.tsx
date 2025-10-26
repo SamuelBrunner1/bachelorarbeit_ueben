@@ -136,9 +136,13 @@ export default function Home() {
           <p className="text-lg sm:text-xl md:text-2xl mb-8 font-light text-gray-700">
             Unser Chatbot beantwortet Immobilienanfragen automatisch – modern, effizient und rund um die Uhr verfügbar.
           </p>
-          <a href="#chatbot" className="bg-blue-600 text-white px-8 py-4 rounded-xl font-semibold shadow-lg hover:bg-blue-700 transition">
-            💬 ImmoBot starten
-          </a>
+          <a
+  href="#chatbot"
+  className="mt-8 bg-blue-600 text-white px-8 py-4 rounded-xl font-semibold shadow-lg hover:shadow-xl hover:bg-blue-700 transition-all duration-300"
+>
+  💬 ImmoBot starten
+</a>
+
         </div>
       </section>
 
