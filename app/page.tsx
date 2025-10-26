@@ -130,37 +130,47 @@ export default function HomePage() {
         className="hidden fixed inset-0 bg-black bg-opacity-40 z-40"
       ></div>
 
-      {/* ✅ HERO SECTION */}
-      <section
-        id="home"
-        className="relative min-h-[90vh] flex flex-col justify-center items-center text-center 
-                   bg-gradient-to-br from-blue-100 via-white to-blue-50 overflow-hidden pt-28 md:pt-32"
-      >
-        {/* Deko */}
-        <div className="absolute top-[-50px] left-[-50px] w-64 h-64 bg-blue-200 rounded-full opacity-30 animate-pulse"></div>
-        <div className="absolute bottom-[-60px] right-[-60px] w-80 h-80 bg-blue-300 rounded-full opacity-20 animate-pulse"></div>
+   {/* ✅ HERO SECTION */}
+<section
+  id="home"
+  className="relative min-h-[90vh] flex flex-col justify-center items-center text-center 
+             bg-gradient-to-br from-blue-100 via-white to-blue-50 overflow-hidden pt-28 md:pt-32"
+>
+  {/* Deko */}
+  <div className="absolute top-[-50px] left-[-50px] w-64 h-64 bg-blue-200 rounded-full opacity-30 animate-pulse"></div>
+  <div className="absolute bottom-[-60px] right-[-60px] w-80 h-80 bg-blue-300 rounded-full opacity-20 animate-pulse"></div>
 
-        {/* Text */}
-        <div className="relative max-w-3xl px-6 z-10">
-          <h1 className="text-4xl sm:text-5xl md:text-7xl font-extrabold mb-6 text-gray-900 leading-tight">
-            Immobilien-Chatbots neu gedacht.<br className="hidden sm:block" />{" "}
-            Einfach ausprobieren – kostenlos und jederzeit erlebbar.
-          </h1>
-          <p className="text-lg sm:text-xl md:text-2xl mb-8 font-light text-gray-700">
-            Unser Chatbot beantwortet Immobilienanfragen automatisch – modern, effizient und rund um die Uhr verfügbar.
-          </p>
-          <a
-            href="#chatbot"
-            className="mt-8 bg-blue-600 text-white px-8 py-4 rounded-xl font-semibold shadow-lg 
-                       hover:shadow-xl hover:bg-blue-700 transition-all duration-300"
-          >
-            💬 ImmoBot starten
-          </a>
-        </div>
-      </section>
+  {/* Text */}
+  <div className="relative max-w-3xl px-6 z-10">
+    <h1 className="text-4xl sm:text-5xl md:text-7xl font-extrabold mb-6 text-gray-900 leading-tight">
+      Immobilien-Chatbots neu gedacht.<br className="hidden sm:block" />{" "}
+      Einfach ausprobieren – kostenlos und jederzeit erlebbar.
+    </h1>
+    <p className="text-lg sm:text-xl md:text-2xl mb-8 font-light text-gray-700">
+      Unser Chatbot beantwortet Immobilienanfragen automatisch – modern, effizient und rund um die Uhr verfügbar.
+    </p>
 
-      {/* 💬 ChatWidget (schwebend unten rechts) */}
-      <ChatWidget />
+    {/* 💬 Button öffnet direkt den Chat */}
+<a
+  href="#"
+  onClick={(e) => {
+    e.preventDefault();
+    const chatBtn = document.querySelector<HTMLButtonElement>(".chat-toggle");
+    chatBtn?.click(); // öffnet den ChatWidget-Button
+  }}
+  className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white 
+             px-6 py-3 md:px-8 md:py-3.5 rounded-xl font-semibold shadow-lg 
+             hover:shadow-xl hover:bg-blue-700 transition-all duration-300 mb-12"
+>
+  💬 ImmoBot starten
+</a>
+
+  </div>
+</section>
+
+{/* 💬 ChatWidget (schwebend unten rechts) */}
+<ChatWidget />
+
     
 
 
