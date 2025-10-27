@@ -4,19 +4,35 @@ import { useState, useEffect, useRef } from "react";
 export default function ChatbotPage() {
   const [messages, setMessages] = useState<{ sender: string; text: string }[]>([]);
   const [input, setInput] = useState("");
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  // 👋 Begrüßungsnachricht beim Laden
+  // Begrüßung beim Start
   useEffect(() => {
     setMessages([{ sender: "Bot", text: "👋 Hallo! Wie kann ich Ihnen helfen?" }]);
   }, []);
 
-  // 🔽 Immer zur letzten Nachricht scrollen, wenn neue kommt
+  // Automatisch nach unten scrollen bei neuer Nachricht
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // 📤 Nachricht senden
+  // Keyboard-Erkennung (Mobile)
+  useEffect(() => {
+    const handleResize = () => {
+      // Prüft, ob sich das Fenster durch die Tastatur sichtbar verkleinert hat
+      if (window.innerHeight < document.documentElement.clientHeight - 150) {
+        setKeyboardVisible(true);
+      } else {
+        setKeyboardVisible(false);
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // Nachricht senden
   const sendMessage = async () => {
     if (!input.trim()) return;
     const userMessage = { sender: "Du", text: input };
@@ -42,11 +58,12 @@ export default function ChatbotPage() {
 
   return (
     <div
-      className="flex flex-col h-screen bg-gradient-to-br from-white via-blue-50 to-blue-100
-                 text-gray-800 p-4 rounded-b-2xl"
+      className={`flex flex-col h-screen bg-gradient-to-br from-white via-blue-50 to-blue-100 
+                  text-gray-800 p-4 rounded-b-2xl transition-all duration-300
+                  ${keyboardVisible ? "pb-24" : "pb-6"}`}
       style={{ minHeight: "100vh" }}
     >
-      {/* 💬 Nachrichtenbereich */}
+      {/* Nachrichtenbereich */}
       <div
         className="flex-1 overflow-y-auto mb-4 space-y-3 p-3 sm:p-4
                    bg-white/80 backdrop-blur-md border border-gray-200
@@ -68,14 +85,15 @@ export default function ChatbotPage() {
             </div>
           </div>
         ))}
-        {/* 📍 Scroll-Anker */}
+        {/* Scroll-Anker */}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 🖊️ Eingabebereich */}
+      {/* Eingabebereich */}
       <div
         className="flex items-center bg-white border border-gray-200
-                   rounded-full overflow-hidden shadow-md p-[2px]"
+                   rounded-full overflow-hidden shadow-md p-[2px]
+                   transition-all duration-300"
       >
         <input
           value={input}
