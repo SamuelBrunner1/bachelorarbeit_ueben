@@ -1,25 +1,38 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [greeting, setGreeting] = useState("Hallo");
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // Dynamische Begrüßung basierend auf Uhrzeit
+  // 🕓 Dynamische Begrüßung
   useEffect(() => {
     const hour = new Date().getHours();
-    if (hour < 12) setGreeting("Guten Morgen");
-    else if (hour < 18) setGreeting("Guten Tag");
-    else setGreeting("Guten Abend");
+    // könnte später für dynamischen Text genutzt werden
   }, []);
 
-  // Prüfen, ob das Gerät ein kleines Display hat
+  // 📱 Erkennen, ob das Gerät mobil ist
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth <= 768);
     checkMobile();
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  // ⬇️ Scrollt automatisch ans Ende, wenn Keyboard öffnet (Mobile)
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    const handleFocus = () => {
+      if (window.innerWidth < 768) {
+        iframe.scrollIntoView({ behavior: "smooth", block: "end" });
+      }
+    };
+
+    window.addEventListener("focusin", handleFocus);
+    return () => window.removeEventListener("focusin", handleFocus);
   }, []);
 
   return (
@@ -34,37 +47,37 @@ export default function ChatWidget() {
         </button>
       )}
 
-      {/* 🪟 Chatfenster – unterscheidet zwischen Mobile & Desktop */}
+      {/* 🪟 Chatfenster */}
       {open && (
         <>
           {/* ✅ MOBILE-VOLLANSICHT */}
           {isMobile ? (
             <div className="fixed inset-0 bg-white z-50 flex flex-col animate-fadeIn">
               {/* Header */}
-             <div className="flex justify-between items-center p-4 border-b border-gray-200 shadow-sm bg-white">
-  <div className="flex-1 text-center relative">
-    <h2 className="text-lg font-bold text-blue-700 tracking-wide">ImmoBot</h2>
-    {/* Optionaler Online-Indikator */}
-  </div>
-  <button
-    onClick={() => setOpen(false)}
-    className="text-gray-500 hover:text-gray-700 text-2xl leading-none"
-    aria-label="Chat schließen"
-  >
-    ✕
-  </button>
-</div>
-
+              <div className="flex justify-between items-center p-4 border-b border-gray-200 shadow-sm bg-white/70 backdrop-blur">
+                <div className="flex-1 text-center">
+                  <h2 className="text-lg font-bold text-blue-700 tracking-wide">
+                    ImmoBot
+                  </h2>
+                </div>
+                <button
+                  onClick={() => setOpen(false)}
+                  className="text-gray-500 hover:text-gray-700 text-2xl leading-none"
+                  aria-label="Chat schließen"
+                >
+                  ✕
+                </button>
+              </div>
 
               {/* Chat-Bereich */}
               <div className="flex-1 overflow-hidden bg-gradient-to-b from-white to-blue-50/50">
                 <iframe
+                  ref={iframeRef}
                   src="/chatbot"
-                  className="w-full h-full border-0"
+                  className="w-full h-full border-0 text-[18px]"
                   style={{
                     height: "100%",
-                    background:
-                      "linear-gradient(to bottom, white, #eff6ff)",
+                    background: "linear-gradient(to bottom, white, #eff6ff)",
                   }}
                 ></iframe>
               </div>
@@ -73,11 +86,14 @@ export default function ChatWidget() {
             /* ✅ DESKTOP-POPUP */
             <div className="fixed bottom-20 right-6 bg-white rounded-2xl shadow-2xl w-96 h-[550px] flex flex-col z-50 animate-fadeIn">
               {/* Header */}
-              <div className="flex justify-between items-center p-4 border-b border-gray-200">
-                <h3 className="font-semibold text-gray-800">ImmoBot</h3>
+              <div className="flex justify-between items-center p-4 border-b border-gray-200 bg-white/70 backdrop-blur">
+                <div className="flex-1 text-center">
+                  <h3 className="font-semibold text-blue-700">ImmoBot</h3>
+                </div>
                 <button
                   onClick={() => setOpen(false)}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="text-gray-500 hover:text-gray-700 text-xl leading-none"
+                  aria-label="Chat schließen"
                 >
                   ✕
                 </button>
