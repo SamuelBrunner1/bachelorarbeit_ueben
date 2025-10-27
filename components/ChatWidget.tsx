@@ -51,21 +51,22 @@ export default function ChatWidget() {
       {open && (
         <>
       {/* ✅ MOBILE-VOLLANSICHT */}
+{/* ✅ MOBILE-VOLLANSICHT */}
 {isMobile ? (
   <div className="fixed inset-0 bg-white z-50 flex flex-col animate-fadeIn">
-    {/* Header */}
-    <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200/80 bg-white/60 backdrop-blur-md">
+    {/* Header – sanfter blauer Verlauf wie Desktop-Version */}
+    <div className="flex items-center justify-between px-5 py-4 border-b border-blue-100 bg-gradient-to-r from-blue-50 via-white to-blue-50/80 shadow-sm backdrop-blur-sm">
       <div className="flex-1 text-center relative">
-        <h2 className="text-lg font-semibold text-gray-900 tracking-wide">
+        <h2 className="text-lg font-semibold text-gray-800 tracking-wide">
           ImmoBot
         </h2>
-        {/* optionaler subtler Balken oder Schatten unten */}
-        <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-12 h-[2px] bg-blue-500/70 rounded-full"></div>
+        {/* Blauer Akzentbalken unter Titel */}
+        <span className="absolute -bottom-[2px] left-1/2 w-6 h-[2px] bg-blue-600 rounded-full -translate-x-1/2"></span>
       </div>
 
       <button
         onClick={() => setOpen(false)}
-        className="text-gray-400 hover:text-gray-700 text-2xl transition"
+        className="text-gray-400 hover:text-gray-600 text-2xl leading-none transition"
         aria-label="Chat schließen"
       >
         ✕
@@ -88,15 +89,20 @@ export default function ChatWidget() {
   /* ✅ DESKTOP-POPUP */
 <div className="fixed bottom-12 right-10 bg-white rounded-2xl shadow-2xl border border-gray-300/70 w-[520px] h-[720px] flex flex-col z-50 animate-fadeIn backdrop-blur-sm">
     {/* Header */}
-    <div className="flex justify-between items-center p-4 border-b border-gray-200">
-      <h3 className="font-semibold text-gray-800">ImmoBot</h3>
-      <button
-        onClick={() => setOpen(false)}
-        className="text-gray-500 hover:text-gray-700"
-      >
-        ✕
-      </button>
-    </div>
+<div className="flex justify-between items-center px-5 py-3 border-b border-blue-100 bg-gradient-to-r from-blue-50 via-white to-blue-50/80 shadow-sm">
+  <div className="flex-1 text-center relative">
+    <h2 className="text-lg font-semibold text-gray-800 tracking-wide">ImmoBot</h2>
+    <span className="absolute -bottom-[2px] left-1/2 w-6 h-[2px] bg-blue-600 rounded-full -translate-x-1/2"></span>
+  </div>
+  <button
+    onClick={() => setOpen(false)}
+    className="text-gray-400 hover:text-gray-600 text-2xl leading-none transition"
+  >
+    ✕
+  </button>
+</div>
+
+
 
     {/* Chat-Bereich */}
     <iframe

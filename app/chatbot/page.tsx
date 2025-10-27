@@ -74,15 +74,16 @@ export default function ChatbotPage() {
             key={i}
             className={`flex ${m.sender === "Du" ? "justify-end" : "justify-start"}`}
           >
-            <div
-              className={`px-5 py-3 rounded-2xl text-[18px] md:text-[15px] leading-[1.5] tracking-wide max-w-[80%] shadow-sm ${
-                m.sender === "Du"
-                  ? "bg-blue-600 text-white rounded-br-none"
-                  : "bg-gray-100 text-gray-800 rounded-bl-none"
-              }`}
-            >
-              {m.text}
-            </div>
+         <div
+  className={`px-5 py-3 rounded-2xl text-[18px] md:text-[15px] leading-[1.5] tracking-wide max-w-[80%] ${
+    m.sender === "Du"
+      ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-br-none shadow-md"
+      : "bg-gray-100 text-gray-800 rounded-bl-none shadow-inner"
+  }`}
+>
+  {m.text}
+</div>
+
           </div>
         ))}
         {/* Scroll-Anker */}
