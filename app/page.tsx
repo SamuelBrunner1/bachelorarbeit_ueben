@@ -143,11 +143,11 @@ export default function HomePage() {
   {/* Text */}
   <div className="relative max-w-3xl px-6 z-10">
     <h1 className="text-4xl sm:text-5xl md:text-7xl font-extrabold mb-6 text-gray-900 leading-tight">
-      Immobilien-Chatbots neu gedacht.<br className="hidden sm:block" />{" "}
+      Intelligente Chatbots neu gedacht.<br className="hidden sm:block" />{" "}
       Einfach ausprobieren – kostenlos und jederzeit erlebbar.
     </h1>
     <p className="text-lg sm:text-xl md:text-2xl mb-8 font-light text-gray-700">
-      Unser Chatbot beantwortet Immobilienanfragen automatisch – modern, effizient und rund um die Uhr verfügbar.
+      Beantwortet Kundenanfragen automatisch – rund um die Uhr.
     </p>
 
     {/* 💬 Button öffnet direkt den Chat */}
