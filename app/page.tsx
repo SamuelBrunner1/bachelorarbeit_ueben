@@ -23,26 +23,56 @@ export default function HomePage() {
         }
       }
       lastScroll = currentScroll;
+
+      // 📱 Wenn man scrollt → Menü schließen
+      if (mobileMenu && !mobileMenu.classList.contains("hidden")) {
+        closeMenu();
+      }
     };
 
     const closeMenu = () => {
       if (!mobileMenu || !overlay) return;
       mobileMenu.classList.add("hidden");
+      overlay.classList.add("hidden");
       overlay.classList.remove("active");
       document.body.classList.remove("overflow-hidden");
     };
 
-    burgerBtn?.addEventListener("click", () => {
-      mobileMenu?.classList.toggle("hidden");
-      overlay?.classList.toggle("active");
-      document.body.classList.toggle("overflow-hidden");
-    });
+burgerBtn?.addEventListener("click", () => {
+  const isOpen = !mobileMenu?.classList.contains("hidden");
 
+  if (isOpen) {
+    mobileMenu?.classList.add("hidden");
+    overlay?.classList.add("hidden");
+    document.body.classList.remove("overflow-hidden");
+  } else {
+    mobileMenu?.classList.remove("hidden");
+    overlay?.classList.add("hidden"); // ✅ Overlay bleibt unsichtbar
+    document.body.classList.add("overflow-hidden");
+  }
+});
+
+
+    // Overlay-Klick → Menü schließen
     overlay?.addEventListener("click", closeMenu);
+
+    // Klick außerhalb → Menü schließen
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        mobileMenu &&
+        !mobileMenu.contains(e.target as Node) &&
+        !burgerBtn?.contains(e.target as Node)
+      ) {
+        closeMenu();
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+
     window.addEventListener("scroll", handleScroll);
 
     return () => {
       overlay?.removeEventListener("click", closeMenu);
+      document.removeEventListener("mousedown", handleClickOutside);
       window.removeEventListener("scroll", handleScroll);
     };
   }, []);
@@ -111,14 +141,14 @@ export default function HomePage() {
           className="hidden absolute top-full left-0 w-full bg-white shadow-lg border-t border-gray-200 z-50"
         >
           <nav className="flex flex-col items-center py-6 space-y-4 text-gray-700 text-lg font-medium">
-            <a href="#home" className="hover:text-blue-600 transition">Home</a>
-            <a href="#about" className="hover:text-blue-600 transition">Über uns</a>
-            <a href="#faq" className="hover:text-blue-600 transition">FAQ</a>
-            <a
-              href="#chatbot"
-              className="bg-blue-600 text-white px-8 py-4 rounded-xl font-semibold shadow-lg hover:bg-blue-700 transition"
-            >
-              💬 ImmoBot starten
+            <a href="#home" onClick={() => document.getElementById("menuOverlay")?.classList.add("hidden")} className="hover:text-blue-600 transition">
+              Home
+            </a>
+            <a href="#about" onClick={() => document.getElementById("menuOverlay")?.classList.add("hidden")} className="hover:text-blue-600 transition">
+              Über uns
+            </a>
+            <a href="#faq" onClick={() => document.getElementById("menuOverlay")?.classList.add("hidden")} className="hover:text-blue-600 transition">
+              FAQ
             </a>
           </nav>
         </div>
@@ -130,17 +160,25 @@ export default function HomePage() {
         className="hidden fixed inset-0 bg-black bg-opacity-40 z-40"
       ></div>
 
-   {/* ✅ HERO SECTION */}
+      {/* 💬 ChatWidget (schwebend unten rechts) */}
+      <ChatWidget />
+
+
+
+    
+
+
+{/* ✅ HERO SECTION */}
 <section
   id="home"
   className="relative min-h-[90vh] flex flex-col justify-center items-center text-center 
              bg-gradient-to-br from-blue-100 via-white to-blue-50 overflow-hidden pt-28 md:pt-32"
 >
-  {/* Deko */}
+  {/* Deko-Kreise */}
   <div className="absolute top-[-50px] left-[-50px] w-64 h-64 bg-blue-200 rounded-full opacity-30 animate-pulse"></div>
   <div className="absolute bottom-[-60px] right-[-60px] w-80 h-80 bg-blue-300 rounded-full opacity-20 animate-pulse"></div>
 
-  {/* Text */}
+  {/* Text-Inhalt */}
   <div className="relative max-w-3xl px-6 z-10">
     <h1 className="text-4xl sm:text-5xl md:text-7xl font-extrabold mb-6 text-gray-900 leading-tight">
       Intelligente Chatbots neu gedacht.<br className="hidden sm:block" />{" "}
@@ -150,30 +188,22 @@ export default function HomePage() {
       Beantwortet Kundenanfragen automatisch – rund um die Uhr.
     </p>
 
-    {/* 💬 Button öffnet direkt den Chat */}
-<a
-  href="#"
-  onClick={(e) => {
-    e.preventDefault();
-    const chatBtn = document.querySelector<HTMLButtonElement>(".chat-toggle");
-    chatBtn?.click(); // öffnet den ChatWidget-Button
-  }}
-  className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white 
-             px-6 py-3 md:px-8 md:py-3.5 rounded-xl font-semibold shadow-lg 
-             hover:shadow-xl hover:bg-blue-700 transition-all duration-300 mb-12"
->
-  💬 ImmoBot starten
-</a>
-
+    {/* 💬 Chat starten Button */}
+    <a
+      href="#"
+      onClick={(e) => {
+        e.preventDefault();
+        const chatBtn = document.querySelector<HTMLButtonElement>(".chat-toggle");
+        chatBtn?.click(); // öffnet das ChatWidget
+      }}
+      className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white 
+                 px-6 py-3 md:px-8 md:py-3.5 rounded-xl font-semibold shadow-lg 
+                 hover:shadow-xl hover:bg-blue-700 transition-all duration-300 mb-12"
+    >
+      💬 ImmoBot starten
+    </a>
   </div>
 </section>
-
-{/* 💬 ChatWidget (schwebend unten rechts) */}
-<ChatWidget />
-
-    
-
-
 
 
 
@@ -192,7 +222,7 @@ export default function HomePage() {
     <p className="text-base md:text-lg leading-7 text-gray-700">
       ImmoBot ist eine reine Demoseite, die unseren Chatbot in Aktion zeigt.<br />
       Wir sind ein junges Team und möchten hier demonstrieren, wie unsere
-      Chatbots in der Immobilienbranche aussehen und funktionieren.
+      Chatbots aussehen und funktionieren.
       <br />
       <br />
       Der Fokus liegt nicht auf der Website selbst, sondern auf der Qualität
@@ -299,7 +329,7 @@ export default function HomePage() {
     <div>
       <h3 className="font-semibold text-gray-800 mb-3">ImmoBot</h3>
       <p>
-        Eine moderne Immobilien-Demoseite – klar strukturiert, interaktiv und jederzeit erweiterbar.
+        Eine moderne Demoseite – klar strukturiert, interaktiv und jederzeit erweiterbar.
       </p>
     </div>
 
@@ -358,14 +388,7 @@ export default function HomePage() {
             Immobilien ansehen
           </a>
         </li>
-        <li>
-          <a
-            href="#chatbot"
-            className="text-blue-700 hover:underline"
-          >
-            Chatbot starten 💬
-          </a>
-        </li>
+      
       </ul>
     </div>
   </div>
