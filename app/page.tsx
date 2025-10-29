@@ -200,7 +200,7 @@ burgerBtn?.addEventListener("click", () => {
                  px-6 py-3 md:px-8 md:py-3.5 rounded-xl font-semibold shadow-lg 
                  hover:shadow-xl hover:bg-blue-700 transition-all duration-300 mb-12"
     >
-      💬 ImmoBot starten
+      💬 AI Assistent starten
     </a>
   </div>
 </section>

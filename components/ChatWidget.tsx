@@ -58,7 +58,7 @@ export default function ChatWidget() {
     <div className="flex items-center justify-between px-5 py-4 border-b border-blue-100 bg-gradient-to-r from-blue-50 via-white to-blue-50/80 shadow-sm backdrop-blur-sm">
       <div className="flex-1 text-center relative">
         <h2 className="text-lg font-semibold text-gray-800 tracking-wide">
-          ImmoBot
+          AI Assistent
         </h2>
         {/* Blauer Akzentbalken unter Titel */}
         <span className="absolute -bottom-[2px] left-1/2 w-6 h-[2px] bg-blue-600 rounded-full -translate-x-1/2"></span>
@@ -91,7 +91,7 @@ export default function ChatWidget() {
     {/* Header */}
 <div className="flex justify-between items-center px-5 py-3 border-b border-blue-100 bg-gradient-to-r from-blue-50 via-white to-blue-50/80 shadow-sm">
   <div className="flex-1 text-center relative">
-    <h2 className="text-lg font-semibold text-gray-800 tracking-wide">ImmoBot</h2>
+    <h2 className="text-lg font-semibold text-gray-800 tracking-wide">AI Assistent</h2>
     <span className="absolute -bottom-[2px] left-1/2 w-6 h-[2px] bg-blue-600 rounded-full -translate-x-1/2"></span>
   </div>
   <button
