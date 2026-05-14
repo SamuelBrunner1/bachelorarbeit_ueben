@@ -1,0 +1,32 @@
+[
+  {
+    "id": "prop-001",
+    "title": "3-Zimmer Altbauwohnung mit Balkon",
+    "price": "EUR 1.190 / Monat",
+    "location": "Wien, 1070 Neubau",
+    "description": "Klassische Altbauwohnung mit hohen Decken, Parkettboden und schönem Balkon. Nähe U3. Moderne Küche, Badezimmer renoviert. Keine Haustiere.",
+    "available": "01.06.2026",
+    "size": "78 m²",
+    "rooms": 3
+  },
+  {
+    "id": "prop-002",
+    "title": "Modernes Neubau-Apartment",
+    "price": "EUR 1.420 / Monat",
+    "location": "Wien, 1220 Donaustadt",
+    "description": "Neubau mit großem Balkon, Induktionskochfeld, Fußbodenheizung. U2 direkt nebenan. Haustiere nach Rücksprache möglich. Tiefgarage optional.",
+    "available": "15.05.2026",
+    "size": "65 m²",
+    "rooms": 2
+  },
+  {
+    "id": "prop-003",
+    "title": "Reihenhaus mit Garten und Garage",
+    "price": "EUR 689.000 Kaufpreis",
+    "location": "Graz, Eggenberg",
+    "description": "Modernes Reihenhaus, 122 m², Garten ca. 60 m², Garage, 3 Schlafzimmer, 2 Bäder, Wohnzimmer mit Kaminofen. Ideal für Familien.",
+    "available": "Sofort",
+    "size": "122 m²",
+    "rooms": 3
+  }
+]

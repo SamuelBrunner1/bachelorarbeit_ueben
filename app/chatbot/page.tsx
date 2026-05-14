@@ -89,7 +89,7 @@ export default function ChatbotPage() {
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.sender === "Du" ? "justify-end" : "justify-start"}`}>
             <div
-              className={`px-5 py-3 rounded-2xl max-w-[85%] text-[17px] leading-relaxed shadow-sm transition-all duration-200 ${
+              className={`px-5 py-3 rounded-2xl max-w-[85%] text-[17px] leading-relaxed shadow-sm transition-all duration-200 whitespace-pre-wrap break-words ${
                 m.sender === "Du"
                   ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-br-none shadow-md"
                   : "bg-white/80 text-gray-800 backdrop-blur-sm rounded-bl-none shadow-sm"

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "faq-1",
+    "question": "Wie schnell kann eine Besichtigung vereinbart werden?",
+    "answer": "In der Regel können Besichtigungstermine innerhalb von 2–3 Werktagen vereinbart werden. Eine genaue Abstimmung erfolgt direkt über den zuständigen Ansprechpartner.",
+    "tags": ["besichtigung", "termin", "termin vereinbaren"]
+  },
+  {
+    "id": "faq-2",
+    "question": "Sind die Immobilien real oder nur zu Demonstrationszwecken?",
+    "answer": "Diese Website dient ausschließlich als Demonstration. Alle dargestellten Immobilien, Bilder und Informationen sind fiktiv und zu Präsentationszwecken erstellt.",
+    "tags": ["demonstration", "demo", "fiktiv"]
+  },
+  {
+    "id": "faq-3",
+    "question": "Kann später ein Chatbot für Anfragen integriert werden?",
+    "answer": "Ja, die Seite ist bereits dafür vorbereitet. Ein Chatbot kann integriert werden, um Anfragen zu Immobilien, Besichtigungen und Exposés automatisiert zu beantworten.",
+    "tags": ["chatbot", "integration", "integration möglich"]
+  }
+]

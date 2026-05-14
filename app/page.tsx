@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import ChatWidget from "@/components/ChatWidget";
+import properties from "@/data/properties.json";
 
 export default function HomePage() {
   // ✅ Scroll Animation + Sticky Header + Mobile Menu
@@ -205,7 +206,39 @@ burgerBtn?.addEventListener("click", () => {
   </div>
 </section>
 
+{/* ✅ VERFÜGBARE IMMOBILIEN */}
+<section
+  id="properties"
+  className="relative py-12 md:py-20 px-6 bg-white"
+>
+  <div className="max-w-6xl mx-auto">
+    <h2 className="text-3xl md:text-4xl font-bold text-center mb-4">
+      Verfügbare Immobilien
+    </h2>
+    <p className="text-center text-gray-600 mb-10 md:mb-12">
+      Fragen Sie unseren Assistenten nach diesen Objekten
+    </p>
 
+    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {properties.map((prop) => (
+        <div
+          key={prop.id}
+          className="rounded-2xl border border-gray-200 bg-white shadow-sm hover:shadow-md transition-shadow p-6"
+        >
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">{prop.title}</h3>
+          <p className="text-base font-bold text-blue-600 mb-2">{prop.price}</p>
+          <p className="text-sm text-gray-600 mb-3">📍 {prop.location}</p>
+          <p className="text-sm text-gray-700 leading-relaxed mb-4">{prop.description}</p>
+          <div className="flex gap-4 text-xs text-gray-500">
+            <span>📐 {prop.size}</span>
+            <span>🚪 {prop.rooms} Zimmer</span>
+          </div>
+          <p className="text-xs font-medium text-green-600 mt-3">✓ Verfügbar: {prop.available}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
 
 
 

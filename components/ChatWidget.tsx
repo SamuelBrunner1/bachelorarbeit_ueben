@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 
 export default function ChatWidget() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -55,13 +55,13 @@ export default function ChatWidget() {
 {isMobile ? (
   <div className="fixed inset-0 bg-white z-50 flex flex-col animate-fadeIn">
     {/* Header – sanfter blauer Verlauf wie Desktop-Version */}
-    <div className="flex items-center justify-between px-5 py-4 border-b border-blue-100 bg-gradient-to-r from-blue-50 via-white to-blue-50/80 shadow-sm backdrop-blur-sm">
+    <div className="flex items-center justify-between px-5 py-4 border-b border-blue-100 bg-linear-to-r from-blue-50 via-white to-blue-50/80 shadow-sm backdrop-blur-sm">
       <div className="flex-1 text-center relative">
         <h2 className="text-lg font-semibold text-gray-800 tracking-wide">
           AI Assistent
         </h2>
         {/* Blauer Akzentbalken unter Titel */}
-        <span className="absolute -bottom-[2px] left-1/2 w-6 h-[2px] bg-blue-600 rounded-full -translate-x-1/2"></span>
+        <span className="absolute -bottom-0.5 left-1/2 w-6 h-0.5 bg-blue-600 rounded-full -translate-x-1/2"></span>
       </div>
 
       <button
@@ -74,7 +74,7 @@ export default function ChatWidget() {
     </div>
 
     {/* Chat-Bereich */}
-    <div className="flex-1 overflow-hidden bg-gradient-to-b from-white to-blue-50/50">
+    <div className="flex-1 overflow-hidden bg-linear-to-b from-white to-blue-50/50">
       <iframe
         src="/chatbot"
         className="w-full h-full border-0"
@@ -89,10 +89,10 @@ export default function ChatWidget() {
   /* ✅ DESKTOP-POPUP */
 <div className="fixed bottom-12 right-10 bg-white rounded-2xl shadow-2xl border border-gray-300/70 w-[520px] h-[720px] flex flex-col z-50 animate-fadeIn backdrop-blur-sm">
     {/* Header */}
-<div className="flex justify-between items-center px-5 py-3 border-b border-blue-100 bg-gradient-to-r from-blue-50 via-white to-blue-50/80 shadow-sm">
+<div className="flex justify-between items-center px-5 py-3 border-b border-blue-100 bg-linear-to-r from-blue-50 via-white to-blue-50/80 shadow-sm">
   <div className="flex-1 text-center relative">
     <h2 className="text-lg font-semibold text-gray-800 tracking-wide">AI Assistent</h2>
-    <span className="absolute -bottom-[2px] left-1/2 w-6 h-[2px] bg-blue-600 rounded-full -translate-x-1/2"></span>
+    <span className="absolute -bottom-0.5 left-1/2 w-6 h-0.5 bg-blue-600 rounded-full -translate-x-1/2"></span>
   </div>
   <button
     onClick={() => setOpen(false)}
