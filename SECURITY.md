@@ -24,7 +24,7 @@
 - **Ort:** [app/api/chat/route.ts](app/api/chat/route.ts)
 
 ### 4. **Rate Limiting**
-- ✅ 5 Requests pro Minute pro IP
+- ✅ 9 Requests pro Minute pro IP
 - ✅ Sliding-Window Algorithmus
 - ⚠️ **Limitation:** Nur in-Memory (verliert Zustand bei Restart)
 

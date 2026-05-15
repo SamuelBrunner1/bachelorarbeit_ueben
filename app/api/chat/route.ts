@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { appendFile, mkdir } from "fs/promises";
+import { appendFile, mkdir, readFile } from "fs/promises";
 import path from "path";
 import properties from "@/data/properties.json";
 import faqs from "@/data/faqs.json";
@@ -18,8 +18,8 @@ function isCorsAllowed(origin: string | null): boolean {
 }
 
 // --- Simple in-memory rate limiter (per IP + session/API key) ---
-const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
-const RATE_LIMIT_MAX = 5; // max requests per window
+const RATE_LIMIT_WINDOW_MS = 90_000; // 1 minute
+const RATE_LIMIT_MAX = 9; // max requests per window
 const requestLog: Map<string, number[]> = new Map();
 
 type ConversationState = {
@@ -28,9 +28,34 @@ type ConversationState = {
   isInPropertyFlow?: boolean;
   isBooking?: boolean;
   selectedProperty?: string;
+  selectedLocation?: string;
+  selectedTime?: string;
   proposedTime?: string;
+  lastIntent?: string;
+  messages: ConversationMessage[];
   lastUpdated: number;
 };
+
+type ConversationMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+type Chunk = {
+  id: string;
+  text: string;
+};
+
+type RagIndex = {
+  chunks: Chunk[];
+  embeddings: number[][];
+};
+
+const MAX_CONVERSATION_MESSAGES = 8;
+const RAG_TOP_K = 3;
+
+let ragIndex: RagIndex | null = null;
+let ragIndexPromise: Promise<RagIndex> | null = null;
 
 const conversationStateLog: Map<string, ConversationState> = new Map();
 const CONVERSATION_STATE_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours
@@ -99,6 +124,7 @@ function getConversationState(sessionId: string): ConversationState {
   if (!existing) {
     const freshState: ConversationState = {
       isLead: false,
+      messages: [],
       lastUpdated: now,
     };
     conversationStateLog.set(sessionId, freshState);
@@ -108,13 +134,17 @@ function getConversationState(sessionId: string): ConversationState {
   if (now - existing.lastUpdated > CONVERSATION_STATE_TTL_MS) {
     const resetState: ConversationState = {
       isLead: false,
+      messages: [],
       lastUpdated: now,
     };
     conversationStateLog.set(sessionId, resetState);
     return resetState;
   }
 
-  return existing;
+  return {
+    ...existing,
+    messages: existing.messages || [],
+  };
 }
 
 function updateConversationState(sessionId: string, patch: Partial<ConversationState>) {
@@ -122,9 +152,54 @@ function updateConversationState(sessionId: string, patch: Partial<ConversationS
   const updated: ConversationState = {
     ...current,
     ...patch,
+    messages: patch.messages ?? current.messages,
     lastUpdated: Date.now(),
   };
   conversationStateLog.set(sessionId, updated);
+}
+
+function trimConversationMessages(messages: ConversationMessage[]): ConversationMessage[] {
+  if (messages.length <= MAX_CONVERSATION_MESSAGES) {
+    return messages;
+  }
+
+  return messages.slice(messages.length - MAX_CONVERSATION_MESSAGES);
+}
+
+function appendConversationMessage(
+  sessionId: string,
+  message: ConversationMessage
+): ConversationState {
+  const current = getConversationState(sessionId);
+  const nextMessages = trimConversationMessages([...current.messages, message]);
+  const updated: ConversationState = {
+    ...current,
+    messages: nextMessages,
+    lastUpdated: Date.now(),
+  };
+  conversationStateLog.set(sessionId, updated);
+  return updated;
+}
+
+function appendConversationTurn(
+  sessionId: string,
+  userMessage: string,
+  assistantMessage: string
+): ConversationState {
+  const current = getConversationState(sessionId);
+  const nextMessages = trimConversationMessages([
+    ...current.messages,
+    { role: "user", content: userMessage },
+    { role: "assistant", content: assistantMessage },
+  ]);
+
+  const updated: ConversationState = {
+    ...current,
+    messages: nextMessages,
+    lastUpdated: Date.now(),
+  };
+  conversationStateLog.set(sessionId, updated);
+  return updated;
 }
 
 // --- Simple topic filter ---
@@ -320,6 +395,53 @@ function isSmalltalkMessage(message: string): boolean {
   ].some((phrase) => cleaned.includes(phrase));
 }
 
+function isYesIntent(message: string): boolean {
+  const m = message.toLowerCase().trim();
+  return ["ja", "ja bitte", "gerne", "ok", "okay", "jau", "möchte ich", "moechte ich"].includes(m) || m === "ja";
+}
+
+function isTimeIntent(message: string): boolean {
+  const m = message.toLowerCase();
+  return [
+    "morgen",
+    "heute",
+    "übermorgen",
+    "wann",
+    "uhrzeit",
+    "termin",
+    "vormittag",
+    "nachmittag",
+    "abend",
+  ].some((k) => m.includes(k));
+}
+
+function isDetailQuestion(message: string): boolean {
+  const m = message.toLowerCase();
+  return [
+    "was kostet die",
+    "wie groß ist die",
+    "wie gross ist die",
+    "ist die noch verfügbar",
+    "ist die noch verfuegbar",
+    "verfügbar",
+    "verfuegbar",
+    "wie viel kostet die",
+  ].some((phrase) => m.includes(phrase));
+}
+
+function getPropertyByTitle(title?: string) {
+  if (!title) return null;
+  return properties.find((property) => property.title === title) || null;
+}
+
+function getDetailQuestionReply(property: (typeof properties)[number] | null): string {
+  if (!property) {
+    return "Meinen Sie die zuvor genannte Immobilie oder möchten Sie eine andere auswählen?";
+  }
+
+  return `Gerne. Hier die Details zur Immobilie:\n\n• ${property.title}\n  Ort: ${property.location}\n  Preis: ${property.price}\n  Größe: ${property.size}, ${property.rooms} Zimmer\n  Verfügbar: ${property.available}`;
+}
+
 function isLeadInterestMessage(message: string): boolean {
   const cleaned = message.toLowerCase();
   return [
@@ -434,10 +556,196 @@ function getOffTopicReply(): string {
   ]);
 }
 
+// --- RAG helpers ---
+function normalizeRagText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function chunkFromFaq(faq: { question: string; answer: string; id: string }): Chunk {
+  return {
+    id: `faq:${faq.id}`,
+    text: normalizeRagText(`FAQ: ${faq.question}. Antwort: ${faq.answer}`),
+  };
+}
+
+function chunkFromProperty(prop: (typeof properties)[number]): Chunk {
+  return {
+    id: `property:${prop.id}`,
+    text: normalizeRagText(
+      `Property: ${prop.title}. Preis: ${prop.price}. Ort: ${prop.location}. Größe: ${prop.size}, ${prop.rooms} Zimmer. Verfügbar: ${prop.available}. Beschreibung: ${prop.description}`
+    ),
+  };
+}
+
+function chunkFromKnowledge(id: string, text: string): Chunk {
+  return {
+    id,
+    text: normalizeRagText(text),
+  };
+}
+
+function splitKnowledgeText(text: string): string[] {
+  return text
+    .split(/\n\s*\n+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function buildRagChunksFromLocalData(knowledgeText?: string): Chunk[] {
+  const faqChunks = faqs.map((faq) => chunkFromFaq(faq));
+  const propertyChunks = properties.map((property) => chunkFromProperty(property));
+  const knowledgeChunks = knowledgeText
+    ? splitKnowledgeText(knowledgeText).map((part, index) =>
+        chunkFromKnowledge(`knowledge:${index + 1}`, part)
+      )
+    : [];
+
+  return [...faqChunks, ...propertyChunks, ...knowledgeChunks];
+}
+
+function cosineSimilarity(left: number[], right: number[]): number {
+  let dot = 0;
+  let leftMagnitude = 0;
+  let rightMagnitude = 0;
+
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    dot += left[index] * right[index];
+    leftMagnitude += left[index] * left[index];
+    rightMagnitude += right[index] * right[index];
+  }
+
+  if (leftMagnitude === 0 || rightMagnitude === 0) return 0;
+  return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
+}
+
+function getEmbeddingDeployment(): string | null {
+  return (
+    process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT?.trim() ||
+    process.env.AZURE_OPENAI_DEPLOYMENT?.trim() ||
+    null
+  );
+}
+
+async function loadOptionalKnowledgeText(): Promise<string | null> {
+  const candidates = ["knowledge.md", "knowledge.txt"];
+
+  for (const filename of candidates) {
+    const filePath = path.join(process.cwd(), "data", filename);
+    try {
+      const content = await readFile(filePath, "utf8");
+      if (content.trim()) return content;
+    } catch {
+      // optional file
+    }
+  }
+
+  return null;
+}
+
+async function embedText(text: string): Promise<number[] | null> {
+  const endpoint = process.env.AZURE_OPENAI_ENDPOINT?.replace(/\/$/, "");
+  const apiKey = process.env.AZURE_OPENAI_API_KEY;
+  const deployment = getEmbeddingDeployment();
+  const apiVersion = process.env.AZURE_OPENAI_API_VERSION;
+
+  if (!endpoint || !apiKey || !deployment || !apiVersion) {
+    return null;
+  }
+
+  const response = await fetch(
+    `${endpoint}/openai/deployments/${deployment}/embeddings?api-version=${apiVersion}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": apiKey,
+      },
+      body: JSON.stringify({ input: text, model: "text-embedding-3-small" }),
+    }
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const data = await response.json();
+  const embedding = data.data?.[0]?.embedding;
+  return Array.isArray(embedding) ? embedding : null;
+}
+
+async function ensureRagIndex(): Promise<RagIndex> {
+  if (ragIndex) return ragIndex;
+
+  if (!ragIndexPromise) {
+    ragIndexPromise = (async () => {
+      const knowledgeText = await loadOptionalKnowledgeText();
+      const chunks = buildRagChunksFromLocalData(knowledgeText || undefined);
+      const embeddings: number[][] = [];
+
+      for (const chunk of chunks) {
+        const embedding = await embedText(chunk.text);
+        if (embedding) {
+          embeddings.push(embedding);
+        } else {
+          embeddings.push([]);
+        }
+      }
+
+      ragIndex = { chunks, embeddings };
+      return ragIndex;
+    })();
+  }
+
+  return ragIndexPromise;
+}
+
+async function retrieveRelevantChunks(query: string, topK: number = RAG_TOP_K): Promise<Chunk[]> {
+  const index = await ensureRagIndex();
+  const queryEmbedding = await embedText(query);
+
+  if (!queryEmbedding) {
+    const fallbackMatches = index.chunks
+      .filter((chunk) => chunk.text.toLowerCase().includes(query.toLowerCase()))
+      .slice(0, topK);
+    return fallbackMatches;
+  }
+
+  const scored = index.chunks
+    .map((chunk, indexPosition) => ({
+      chunk,
+      score: cosineSimilarity(queryEmbedding, index.embeddings[indexPosition] || []),
+    }))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, topK)
+    .filter((item) => item.score > 0);
+
+  return scored.map((item) => item.chunk);
+}
+
+function buildRagContext(chunks: Chunk[]): string {
+  if (!chunks.length) return "";
+
+  return [
+    "Relevante Informationen:",
+    ...chunks.map((chunk) => chunk.text),
+  ].join("\n\n");
+}
+
+function getRecentConversationMessages(sessionId?: string): ConversationMessage[] {
+  if (!sessionId) return [];
+  const state = getConversationState(sessionId);
+  return state.messages.slice(-6);
+}
+
 // --- Price Detection & Parsing ---
-function extractPriceNumber(price: string): number {
-  const digits = price.replace(/\D/g, "");
+function parsePrice(priceString: string): number {
+  const digits = priceString.replace(/\D/g, "");
   return parseInt(digits, 10) || 0;
+}
+
+function extractPriceNumber(price: string): number {
+  return parsePrice(price);
 }
 
 function isCheapestRequest(message: string): boolean {
@@ -514,6 +822,18 @@ function extractLocation(message: string): string | null {
   for (const city of cities) {
     if (m.includes(city)) return city;
   }
+
+  // Check for district phrasing like "7ten bezirk" or "7. bezirk" and map Vienna districts 1-23
+  // Maps: 1 → 1010, 7 → 1070, 23 → 1230, etc.
+  const districtMatch = m.match(/\b(\d{1,2})\.?\s*(?:ten|ter)?\s*bezirk\b/);
+  if (districtMatch) {
+    const num = parseInt(districtMatch[1], 10);
+    if (!isNaN(num) && num >= 1 && num <= 23) {
+      // Vienna district postal code formula: district N → 10N0 or 1N0
+      const postal = num < 10 ? `10${num}0` : `1${num}0`;
+      return postal;
+    }
+  }
   
   return null;
 }
@@ -541,6 +861,276 @@ function extractTime(message: string): string | null {
   const m = message.toLowerCase();
   const match = m.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
   return match ? match[0] : null;
+}
+
+function extractNaturalTimePreference(message: string): string | null {
+  const m = message.toLowerCase();
+  const patterns = [
+    { phrase: "morgen vormittag", value: "morgen Vormittag" },
+    { phrase: "morgen nachmittag", value: "morgen Nachmittag" },
+    { phrase: "morgen abend", value: "morgen Abend" },
+    { phrase: "übermorgen", value: "übermorgen" },
+    { phrase: "morgen", value: "morgen" },
+    { phrase: "vormittag", value: "Vormittag" },
+    { phrase: "nachmittag", value: "Nachmittag" },
+    { phrase: "abend", value: "Abend" },
+    { phrase: "heute", value: "heute" },
+  ];
+
+  const match = patterns.find((entry) => m.includes(entry.phrase));
+  return match ? match.value : null;
+}
+
+function extractRooms(message: string): number | null {
+  const match = message.match(/(\d+)\s*zimmer/i);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+function extractMaxPrice(message: string): number | null {
+  const m = message.toLowerCase();
+
+  // Common phrasing: "unter 1.300", "bis 1300", "bis zu 1.300", "max 1.300", "budget: 1.300"
+  const pattern = /(?:unter|bis(?:\s*zU)?|bis\s*z u|max(?:imal)?|budget)[:\s]*([\d\.\s]+)/i;
+  let match = m.match(pattern);
+
+  // fallback: look for patterns like "€ 1.300" or plain numbers when preceded by the word budget
+  if (!match) {
+    const budgetLabel = m.match(/budget[:\s]*([\d\.\s]+)/i);
+    if (budgetLabel) match = budgetLabel;
+  }
+
+  // last fallback: standalone number if sentence contains the word "budget" or "bis"
+  if (!match && (m.includes("budget") || m.includes("bis") || m.includes("unter") || m.includes("max"))) {
+    const anyNum = m.match(/([\d\.]{2,})/);
+    if (anyNum) match = anyNum;
+  }
+
+  if (!match) return null;
+
+  const normalized = match[1].replace(/\./g, "").replace(/\s+/g, "").replace(/\D/g, "");
+  return normalized ? parseInt(normalized, 10) : null;
+}
+
+function extractSearchLocation(message: string): string | null {
+  const m = message.toLowerCase();
+
+  if (m.includes("wien")) return "wien";
+  if (m.includes("graz")) return "graz";
+
+  const districtMatch = m.match(/\b(?:im|in|beim|bei)\s*(\d{1,2})\.?\s*(?:ten|ter)?(?:\s*bezirk)?\b/);
+  if (districtMatch) {
+    const num = parseInt(districtMatch[1], 10);
+    if (!isNaN(num) && num >= 1 && num <= 23) {
+      const postal = num < 10 ? `10${num}0` : `1${num}0`;
+      return postal;
+    }
+  }
+
+  const zipMatch = m.match(/\b1\d{3}\b/);
+  if (zipMatch && m.includes(`unter ${zipMatch[0]}`)) return null;
+  return zipMatch ? zipMatch[0] : null;
+}
+
+function isOutsideOfCityRequest(message: string, city: string): boolean {
+  const m = message.toLowerCase();
+  const cityToken = city.toLowerCase();
+  // match: "außerhalb von wien", "außer wien", "nicht in wien", "außer wien gelegen"
+  if (/außerhalb\s+(von\s+)?/.test(m) && m.includes(cityToken)) return true;
+  if (m.includes(`außer ${cityToken}`)) return true;
+  if (m.includes(`nicht in ${cityToken}`)) return true;
+  return false;
+}
+
+function extractPropertyOrdinal(message: string): number | null {
+  const m = message.toLowerCase();
+
+  const ordinalMappings = [
+    { phrases: ["erste", "ersten", "1.", "erste immobilie", "erste wohnung"], index: 0 },
+    { phrases: ["zweite", "zweiten", "2.", "zweite immobilie", "zweite wohnung"], index: 1 },
+    { phrases: ["dritte", "dritten", "3.", "dritte immobilie", "dritte wohnung"], index: 2 },
+  ];
+
+  const match = ordinalMappings.find((entry) => entry.phrases.some((phrase) => m.includes(phrase)));
+  return match ? match.index : null;
+}
+
+function extractBookingTimePreference(message: string): string | null {
+  const explicitTime = extractTime(message);
+  const naturalTime = extractNaturalTimePreference(message);
+
+  if (explicitTime && naturalTime) {
+    return `${naturalTime} ${explicitTime}`;
+  }
+
+  return explicitTime || naturalTime;
+}
+
+function resolveBookingProperty(message: string, state?: ConversationState): (typeof properties)[number] | null {
+  const m = message.toLowerCase();
+
+  if (state?.selectedProperty) {
+    const existing = getPropertyByTitle(state.selectedProperty);
+    if (existing) return existing;
+  }
+
+  const directMatch = properties.find((property) => m.includes(property.title.toLowerCase()));
+  if (directMatch) return directMatch;
+
+  const ordinal = extractPropertyOrdinal(message);
+  if (ordinal !== null && properties[ordinal]) {
+    return properties[ordinal];
+  }
+
+  const location = extractLocation(message) || extractSearchLocation(message);
+  if (location) {
+    const locationMatches = properties.filter((property) =>
+      property.location.toLowerCase().includes(location.toLowerCase())
+    );
+
+    if (locationMatches.length === 1) {
+      return locationMatches[0];
+    }
+
+    if (locationMatches.length > 1) {
+      return locationMatches[0];
+    }
+  }
+
+  if (m.includes("wohnung in wien")) {
+    return properties.find((property) => property.location.toLowerCase().includes("wien")) || null;
+  }
+
+  return null;
+}
+
+function buildBookingConfirmationReply(selectedProperty: string, selectedTime: string): string {
+  return `Perfekt, hier die Zusammenfassung:\n\n• Immobilie: ${selectedProperty}\n• Termin: ${selectedTime}\n\nIch habe den Termin für Sie vorgemerkt. Ein Ansprechpartner meldet sich in Kürze zur finalen Bestätigung.`;
+}
+
+function hasExplicitBookingIntent(message: string): boolean {
+  const m = message.toLowerCase();
+  return [
+    "termin",
+    "besichtigung",
+    "besichtigen",
+    "vereinbaren",
+    "vorbeikommen",
+    "anschauen",
+    "schauen",
+  ].some((phrase) => m.includes(phrase));
+}
+
+function sortPropertiesByPrice(list: typeof properties, ascending: boolean): typeof properties {
+  return [...list].sort((left, right) => {
+    const priceLeft = extractPriceNumber(left.price);
+    const priceRight = extractPriceNumber(right.price);
+    return ascending ? priceLeft - priceRight : priceRight - priceLeft;
+  });
+}
+
+function pickCombinedIntentProperty(
+  message: string,
+  list: typeof properties
+): (typeof properties)[number] | null {
+  if (isCheapestRequest(message)) {
+    return sortPropertiesByPrice(list, true)[0] || null;
+  }
+
+  if (isMostExpensiveRequest(message)) {
+    return sortPropertiesByPrice(list, false)[0] || null;
+  }
+
+  const resolved = resolveBookingProperty(message);
+  if (resolved) return list.find((entry) => entry.title === resolved.title) || resolved;
+
+  if (list.length === 1) return list[0];
+  return null;
+}
+
+function buildCombinedIntentReply(
+  message: string,
+  propertiesToShow: typeof properties,
+  requestedTime: string | null
+): {
+  reply: string;
+  selectedProperty?: (typeof properties)[number];
+  bookingCompleted: boolean;
+} {
+  const explicitBookingIntent = hasExplicitBookingIntent(message);
+  const selectedProperty = pickCombinedIntentProperty(message, propertiesToShow);
+
+  if (selectedProperty && explicitBookingIntent && requestedTime) {
+    return {
+      reply: buildBookingConfirmationReply(selectedProperty.title, requestedTime),
+      selectedProperty,
+      bookingCompleted: true,
+    };
+  }
+
+  const intro = selectedProperty
+    ? isCheapestRequest(message)
+      ? "Die günstigste passende Immobilie ist:"
+      : isMostExpensiveRequest(message)
+        ? "Die teuerste passende Immobilie ist:"
+        : "Ich habe folgende passende Immobilie für Sie:"
+    : "Ich habe folgende passende Immobilien für Sie:";
+
+  const list = selectedProperty ? [selectedProperty] : propertiesToShow;
+  const timePrompt = requestedTime
+    ? `Besichtigungen sind möglich. Möchten Sie einen Termin für ${requestedTime} festlegen?`
+    : explicitBookingIntent
+      ? "Besichtigungen sind möglich. Wann passt es Ihnen für die Besichtigung?"
+      : "Besichtigungen sind möglich. Möchten Sie einen Termin vereinbaren?";
+
+  return {
+    reply: `${intro}\n\n${formatPropertyList(list)}\n\n${timePrompt}`,
+    selectedProperty: selectedProperty ?? undefined,
+    bookingCompleted: false,
+  };
+}
+
+function applyFilters(message: string, list: typeof properties): typeof properties {
+  let filtered = [...list];
+
+  const rooms = extractRooms(message);
+  const maxPrice = extractMaxPrice(message);
+  const location = extractSearchLocation(message);
+
+  if (rooms !== null) {
+    filtered = filtered.filter((property) => Number(property.rooms) === rooms);
+  }
+
+  if (maxPrice !== null) {
+    filtered = filtered.filter((property) => {
+      const price = parsePrice(property.price);
+      return price <= maxPrice;
+    });
+  }
+
+  if (location) {
+    filtered = filtered.filter((property) =>
+      property.location.toLowerCase().includes(location)
+    );
+  }
+
+  return filtered;
+}
+
+function buildContextFromList(list: typeof properties): { context: string; found: boolean } {
+  const found = list.length > 0;
+
+  const context = list
+    .map(
+      (prop) =>
+        `**${prop.title}**\n` +
+        `Preis: ${prop.price}\n` +
+        `Ort: ${prop.location}\n` +
+        `Größe: ${prop.size}, ${prop.rooms} Zimmer\n` +
+        `Verfügbar: ${prop.available}`
+    )
+    .join("\n\n---\n\n");
+
+  return { context, found };
 }
 
 function buildContext(userMessage: string): { context: string; found: boolean } {
@@ -726,9 +1316,291 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // --- Booking Flow Continuation (property/time selection) ---
+  const requestedTime = extractBookingTimePreference(sanitizedMessage);
+  const explicitBookingIntent = hasExplicitBookingIntent(sanitizedMessage);
+
+  const combinedPropertyIntent =
+    isCheapestRequest(sanitizedMessage) ||
+    isMostExpensiveRequest(sanitizedMessage) ||
+    isPropertyTopic(sanitizedMessage);
+
+  if (!conversationState?.isBooking && combinedPropertyIntent && (explicitBookingIntent || requestedTime)) {
+    const rooms = extractRooms(sanitizedMessage);
+    const maxPrice = extractMaxPrice(sanitizedMessage);
+    const searchLocation = extractSearchLocation(sanitizedMessage);
+    const hasPropertyFilters = rooms !== null || maxPrice !== null || searchLocation !== null;
+    const filteredProperties = applyFilters(sanitizedMessage, properties);
+    const propertiesToShow = hasPropertyFilters ? filteredProperties : properties;
+
+    if (hasPropertyFilters && filteredProperties.length === 0) {
+      const reply = "Leider habe ich aktuell keine passenden Immobilien für diese Kriterien. Möchten Sie die Suche etwas anpassen (z. B. Budget oder Zimmeranzahl)?";
+
+      if (session?.sid) {
+        updateConversationState(session.sid, { isInPropertyFlow: true, isBooking: false, lastIntent: "search_filter" });
+        appendConversationTurn(session.sid, sanitizedMessage, reply);
+      }
+
+      return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+    }
+
+    const combined = buildCombinedIntentReply(sanitizedMessage, propertiesToShow, requestedTime);
+
+    if (session?.sid) {
+      updateConversationState(session.sid, {
+        isInPropertyFlow: true,
+        isBooking: !combined.bookingCompleted,
+        selectedProperty: combined.selectedProperty?.title,
+        selectedLocation: combined.selectedProperty?.location,
+        selectedTime: requestedTime || undefined,
+        proposedTime: requestedTime || undefined,
+        lastIntent: combined.bookingCompleted
+          ? "booking_completed"
+          : requestedTime
+            ? "booking_started_via_multi_intent"
+            : "search_filter",
+      });
+      appendConversationTurn(session.sid, sanitizedMessage, combined.reply);
+    }
+
+    return NextResponse.json({ reply: combined.reply }, { headers: buildSecurityHeaders() });
+  }
+
+  // --- Priority 1: Booking Flow ---
+  const bookingTrigger =
+    isYesIntent(sanitizedMessage) ||
+    isAppointmentQuestion(sanitizedMessage) ||
+    sanitizedMessage.toLowerCase().includes("besichtigung");
+  const shouldStartBooking = !conversationState?.isBooking && conversationState?.isInPropertyFlow && bookingTrigger;
+
+  if (conversationState?.isBooking || shouldStartBooking) {
+    const activeState = session?.sid ? getConversationState(session.sid) : conversationState;
+    const resolvedProperty = resolveBookingProperty(sanitizedMessage, activeState);
+    const nextSelectedProperty = resolvedProperty?.title || activeState?.selectedProperty;
+    const nextSelectedLocation = resolvedProperty?.location || activeState?.selectedLocation;
+    const nextSelectedTime = activeState?.selectedTime || extractBookingTimePreference(sanitizedMessage);
+    const bookingTime = nextSelectedTime || undefined;
+
+    if (!nextSelectedProperty && nextSelectedTime) {
+      const reply = "Für welche Immobilie möchten Sie den Termin vereinbaren?";
+
+      if (session?.sid) {
+        updateConversationState(session.sid, {
+          isBooking: true,
+          selectedTime: nextSelectedTime,
+          lastIntent: "booking_waiting_for_property",
+        });
+        appendConversationTurn(session.sid, sanitizedMessage, reply);
+      }
+
+      return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+    }
+
+    if (nextSelectedProperty && !nextSelectedTime) {
+      const reply = nextSelectedProperty
+        ? `Perfekt. Für die Immobilie "${nextSelectedProperty}" – wann passt es Ihnen für die Besichtigung?`
+        : "Wann passt es Ihnen für die Besichtigung?";
+
+      if (session?.sid) {
+        updateConversationState(session.sid, {
+          isBooking: true,
+          selectedProperty: nextSelectedProperty,
+          selectedLocation: nextSelectedLocation,
+          selectedTime: undefined,
+          proposedTime: undefined,
+          lastIntent: shouldStartBooking ? "booking_started_via_affirmation" : "booking_started",
+        });
+        appendConversationTurn(session.sid, sanitizedMessage, reply);
+      }
+
+      return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+    }
+
+    if (!nextSelectedProperty) {
+      const reply = "Für welche Immobilie möchten Sie den Termin vereinbaren?";
+
+      if (session?.sid) {
+        updateConversationState(session.sid, {
+          isBooking: true,
+          lastIntent: shouldStartBooking ? "booking_started_via_affirmation" : "booking_started",
+        });
+        appendConversationTurn(session.sid, sanitizedMessage, reply);
+      }
+
+      return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+    }
+
+    const reply = buildBookingConfirmationReply(nextSelectedProperty, nextSelectedTime!);
+
+    if (session?.sid) {
+      updateConversationState(session.sid, {
+        isBooking: false,
+        isInPropertyFlow: true,
+        selectedProperty: nextSelectedProperty,
+        selectedLocation: nextSelectedLocation,
+          selectedTime: bookingTime,
+          proposedTime: bookingTime,
+        lastIntent: "booking_completed",
+      });
+      appendConversationTurn(session.sid, sanitizedMessage, reply);
+    }
+
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  // --- Priority 1: Greeting Check ---
+  if (isGreetingOnly(sanitizedMessage)) {
+    await logSecurityEvent("info", "greeting_detected", {
+      requestId,
+      ip: maskIp(ip),
+      bucket: authBucket,
+    });
+
+    return NextResponse.json(
+      { reply: getGreetingReply() },
+      { headers: buildSecurityHeaders() }
+    );
+  }
+
+  // --- Priority 2: Smalltalk Check (before Time Intent to avoid "wie gehts" collision) ---
+  if (isSmalltalkMessage(sanitizedMessage)) {
+    await logSecurityEvent("info", "smalltalk_detected", {
+      requestId,
+      ip: maskIp(ip),
+      bucket: authBucket,
+    });
+
+    return NextResponse.json(
+      { reply: getSmalltalkReply() },
+      { headers: buildSecurityHeaders() }
+    );
+  }
+
+  // --- Priority 3: Price Comparison Queries ---
+  if (isCheapestRequest(sanitizedMessage)) {
+    const cheapest = getPriceSortedProperties(true);
+    const reply = getCheapestPropertyReply();
+    await logSecurityEvent("info", "cheapest_request", {
+      requestId,
+      ip: maskIp(ip),
+      bucket: authBucket,
+    });
+
+    if (session?.sid) {
+      updateConversationState(session.sid, {
+        isInPropertyFlow: true,
+        selectedProperty: cheapest?.title,
+        selectedLocation: cheapest?.location,
+        lastIntent: "price_query",
+      });
+      appendConversationTurn(session.sid, sanitizedMessage, reply);
+    }
+
+    return NextResponse.json(
+      { reply },
+      { headers: buildSecurityHeaders() }
+    );
+  }
+
+  if (isMostExpensiveRequest(sanitizedMessage)) {
+    const mostExpensive = getPriceSortedProperties(false);
+    const reply = getMostExpensivePropertyReply();
+    await logSecurityEvent("info", "most_expensive_request", {
+      requestId,
+      ip: maskIp(ip),
+      bucket: authBucket,
+    });
+
+    if (session?.sid) {
+      updateConversationState(session.sid, {
+        isInPropertyFlow: true,
+        selectedProperty: mostExpensive?.title,
+        selectedLocation: mostExpensive?.location,
+        lastIntent: "price_query",
+      });
+      appendConversationTurn(session.sid, sanitizedMessage, reply);
+    }
+
+    return NextResponse.json(
+      { reply },
+      { headers: buildSecurityHeaders() }
+    );
+  }
+
+  // --- Priority 4: Time Intent Handler (after greeting/smalltalk/prices) ---
+  if (isTimeIntent(sanitizedMessage)) {
+    await logSecurityEvent("info", "time_intent_detected", {
+      requestId,
+      ip: maskIp(ip),
+      bucket: authBucket,
+    });
+
+    if (conversationState?.selectedProperty && requestedTime) {
+      const reply = buildBookingConfirmationReply(conversationState.selectedProperty, requestedTime);
+
+      if (session?.sid) {
+        updateConversationState(session.sid, {
+          isBooking: false,
+          isInPropertyFlow: true,
+          selectedTime: requestedTime,
+          proposedTime: requestedTime,
+          lastIntent: "booking_completed",
+        });
+        appendConversationTurn(session.sid, sanitizedMessage, reply);
+      }
+
+      return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+    }
+
+    // Case A: Booking is active but no property has been selected yet
+    if (conversationState?.isBooking && requestedTime && !conversationState?.selectedProperty) {
+      const reply = "Für welche Immobilie möchten Sie den Termin vereinbaren?";
+
+      if (session?.sid) {
+        updateConversationState(session.sid, {
+          selectedTime: requestedTime,
+          proposedTime: requestedTime,
+          lastIntent: "booking_waiting_for_property",
+        });
+        appendConversationTurn(session.sid, sanitizedMessage, reply);
+      }
+
+      return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+    }
+
+    // Case B: Property already selected, but no exact time yet
+    if (conversationState?.selectedProperty) {
+      const reply = `Ja, für die Immobilie "${conversationState.selectedProperty}" sind Besichtigungen möglich. Wann passt es Ihnen genau?`;
+
+      if (session?.sid) {
+        updateConversationState(session.sid, { lastIntent: "time_intent" });
+        appendConversationTurn(session.sid, sanitizedMessage, reply);
+      }
+
+      return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+    }
+
+    // Case C: No context - ask for property
+    return NextResponse.json(
+      {
+        reply: "Grundsätzlich sind Besichtigungen möglich. Für welche Immobilie interessieren Sie sich?",
+      },
+      { headers: buildSecurityHeaders() }
+    );
+  }
+
+  // --- Priority 5: Booking Flow Continuation (property/time selection) ---
   if (conversationState?.isBooking) {
-    // 1) property selection
+    // 1) Handle simple "yes" to confirm booking without property/time clarification
+    if (isYesIntent(sanitizedMessage)) {
+      return NextResponse.json(
+        {
+          reply: "Perfekt. Wann passt es Ihnen für die Besichtigung?",
+        },
+        { headers: buildSecurityHeaders() }
+      );
+    }
+
+    // 2) property selection
     const selected = extractProperty(sanitizedMessage);
     if (selected) {
       await logSecurityEvent("info", "property_selected", {
@@ -740,6 +1612,11 @@ export async function POST(req: NextRequest) {
 
       if (session?.sid) {
         updateConversationState(session.sid, { selectedProperty: selected });
+        appendConversationMessage(session.sid, { role: "user", content: sanitizedMessage });
+        appendConversationMessage(session.sid, {
+          role: "assistant",
+          content: `Perfekt. Für die Immobilie "${selected}" – wann passt es Ihnen für die Besichtigung?`,
+        });
       }
 
       return NextResponse.json(
@@ -750,7 +1627,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2) time selection
+    // 2b) location-based property selection while booking
+    const location = extractLocation(sanitizedMessage);
+    if (location) {
+      const propertiesInLocation = properties.filter((p) =>
+        p.location.toLowerCase().includes(location.toLowerCase())
+      );
+
+      if (propertiesInLocation.length > 0) {
+        const latestState = session?.sid ? getConversationState(session.sid) : conversationState;
+        const selectedProperty = latestState?.selectedProperty || propertiesInLocation[0].title;
+
+        if (session?.sid) {
+          updateConversationState(session.sid, { selectedProperty });
+          appendConversationMessage(session.sid, { role: "user", content: sanitizedMessage });
+          appendConversationMessage(session.sid, {
+            role: "assistant",
+            content: `Perfekt. Für die Immobilie "${selectedProperty}" – wann passt es Ihnen für die Besichtigung?`,
+          });
+        }
+
+        return NextResponse.json(
+          {
+            reply: `Perfekt. Für die Immobilie "${selectedProperty}" – wann passt es Ihnen für die Besichtigung?`,
+          },
+          { headers: buildSecurityHeaders() }
+        );
+      }
+    }
+
+    // 3) time selection
     const time = extractTime(sanitizedMessage);
     if (time) {
       // refresh state to read selectedProperty
@@ -760,7 +1666,13 @@ export async function POST(req: NextRequest) {
         updateConversationState(session.sid, {
           proposedTime: time,
           isBooking: false,
+          lastIntent: "time_intent",
         });
+        appendConversationTurn(
+          session.sid,
+          sanitizedMessage,
+          `Perfekt, hier die Zusammenfassung:\n\n• Immobilie: ${latestState?.selectedProperty || "nicht angegeben"}\n• Termin: ${time}\n\nEin Ansprechpartner wird sich zur Bestätigung bei Ihnen melden.`
+        );
       }
 
       await logSecurityEvent("info", "time_selected", {
@@ -785,68 +1697,17 @@ export async function POST(req: NextRequest) {
         { headers: buildSecurityHeaders() }
       );
     }
-  }
 
-  // --- Price Comparison Queries ---
-  if (isCheapestRequest(sanitizedMessage)) {
-    await logSecurityEvent("info", "cheapest_request", {
-      requestId,
-      ip: maskIp(ip),
-      bucket: authBucket,
-    });
-
-    if (session?.sid) {
-      updateConversationState(session.sid, { isInPropertyFlow: true });
-    }
-
+    // Fallback within booking: improved fallback message
     return NextResponse.json(
-      { reply: getCheapestPropertyReply() },
+      {
+        reply: "Meinen Sie die zuvor genannte Immobilie oder möchten Sie eine andere auswählen?",
+      },
       { headers: buildSecurityHeaders() }
     );
   }
 
-  if (isMostExpensiveRequest(sanitizedMessage)) {
-    await logSecurityEvent("info", "most_expensive_request", {
-      requestId,
-      ip: maskIp(ip),
-      bucket: authBucket,
-    });
 
-    if (session?.sid) {
-      updateConversationState(session.sid, { isInPropertyFlow: true });
-    }
-
-    return NextResponse.json(
-      { reply: getMostExpensivePropertyReply() },
-      { headers: buildSecurityHeaders() }
-    );
-  }
-
-  if (isGreetingOnly(sanitizedMessage)) {
-    await logSecurityEvent("info", "greeting_detected", {
-      requestId,
-      ip: maskIp(ip),
-      bucket: authBucket,
-    });
-
-    return NextResponse.json(
-      { reply: getGreetingReply() },
-      { headers: buildSecurityHeaders() }
-    );
-  }
-
-  if (isSmalltalkMessage(sanitizedMessage)) {
-    await logSecurityEvent("info", "smalltalk_detected", {
-      requestId,
-      ip: maskIp(ip),
-      bucket: authBucket,
-    });
-
-    return NextResponse.json(
-      { reply: getSmalltalkReply() },
-      { headers: buildSecurityHeaders() }
-    );
-  }
 
 // Identity (Wer bist du?)
 if (isIdentityQuestion(sanitizedMessage)) {
@@ -881,7 +1742,6 @@ if (isCapabilityQuestion(sanitizedMessage)) {
 }
 
 if (conversationState?.isLead) {
-  // 🔹 Erneutes Interesse (z. B. "wie funktioniert das?")
   if (isLeadInterestMessage(sanitizedMessage)) {
     await logSecurityEvent("info", "lead_interest_detected", {
       requestId,
@@ -902,7 +1762,6 @@ if (conversationState?.isLead) {
     );
   }
 
-  // 🔹 Follow-up wie "ja", "gerne", etc.
   if (isLeadFollowUpMessage(sanitizedMessage)) {
     await logSecurityEvent("info", "lead_followup_detected", {
       requestId,
@@ -916,7 +1775,6 @@ if (conversationState?.isLead) {
     );
   }
 
-  // 🔹 Wenn User konkrete Infos schreibt (z. B. Branche, Details)
   if (sanitizedMessage.length > 10) {
     await logSecurityEvent("info", "lead_context_progress", {
       requestId,
@@ -925,12 +1783,14 @@ if (conversationState?.isLead) {
     });
 
     return NextResponse.json(
-      { reply: "Perfekt, das hilft schon sehr. Möchten Sie, dass ich Ihnen kurz zeige, wie so ein Chatbot konkret für Ihr Unternehmen aussehen könnte?" },
+      {
+        reply:
+          "Perfekt, das hilft schon sehr. Möchten Sie, dass ich Ihnen kurz zeige, wie so ein Chatbot konkret für Ihr Unternehmen aussehen könnte?",
+      },
       { headers: buildSecurityHeaders() }
     );
   }
 
-  // 🔹 Default innerhalb Lead-Flow
   await logSecurityEvent("info", "lead_context_continue", {
     requestId,
     ip: maskIp(ip),
@@ -943,41 +1803,70 @@ if (conversationState?.isLead) {
   );
 }
 
-  if (isOpeningHoursQuestion(sanitizedMessage)) {
-    await logSecurityEvent("info", "opening_hours_question", {
-      requestId,
-      ip: maskIp(ip),
-      bucket: authBucket,
-    });
+if (isOpeningHoursQuestion(sanitizedMessage)) {
+  await logSecurityEvent("info", "opening_hours_question", {
+    requestId,
+    ip: maskIp(ip),
+    bucket: authBucket,
+  });
 
-    return NextResponse.json(
-      { reply: getOpeningHoursReply() },
-      { headers: buildSecurityHeaders() }
-    );
+  return NextResponse.json(
+    { reply: getOpeningHoursReply() },
+    { headers: buildSecurityHeaders() }
+  );
+}
+
+if (isLeadInterestMessage(sanitizedMessage)) {
+  await logSecurityEvent("info", "lead_interest_detected", {
+    requestId,
+    ip: maskIp(ip),
+    bucket: authBucket,
+  });
+
+  if (session?.sid) {
+    updateConversationState(session.sid, {
+      isLead: true,
+      leadTopic: "chatbot",
+      lastIntent: "lead_interest",
+    });
   }
 
-  if (isLeadInterestMessage(sanitizedMessage)) {
-    await logSecurityEvent("info", "lead_interest_detected", {
-      requestId,
-      ip: maskIp(ip),
-      bucket: authBucket,
+  return NextResponse.json(
+    { reply: getLeadInterestReply() },
+    { headers: buildSecurityHeaders() }
+  );
+}
+
+if (isAppointmentQuestion(sanitizedMessage)) {
+  await logSecurityEvent("info", "booking_started", {
+    requestId,
+    ip: maskIp(ip),
+    bucket: authBucket,
+  });
+
+  if (session?.sid) {
+    updateConversationState(session.sid, {
+      isBooking: true,
+      isInPropertyFlow: true,
+      selectedProperty: undefined,
+      proposedTime: undefined,
+      lastIntent: "booking_started",
     });
-
-    if (session?.sid) {
-      updateConversationState(session.sid, {
-        isLead: true,
-        leadTopic: "chatbot",
-      });
-    }
-
-    return NextResponse.json(
-      { reply: getLeadInterestReply() },
-      { headers: buildSecurityHeaders() }
-    );
   }
 
-  if (isAppointmentQuestion(sanitizedMessage)) {
-    await logSecurityEvent("info", "booking_started", {
+  return NextResponse.json(
+    { reply: "Gerne. Für welche Immobilie möchten Sie einen Besichtigungstermin vereinbaren?" },
+    { headers: buildSecurityHeaders() }
+  );
+}
+
+// --- Booking Trigger: "ja" after property shown (not yet in booking) ---
+if (
+  conversationState?.isInPropertyFlow &&
+  !conversationState?.isBooking &&
+  isYesIntent(sanitizedMessage)
+) {
+    await logSecurityEvent("info", "booking_started_via_affirmation", {
       requestId,
       ip: maskIp(ip),
       bucket: authBucket,
@@ -986,45 +1875,199 @@ if (conversationState?.isLead) {
     if (session?.sid) {
       updateConversationState(session.sid, {
         isBooking: true,
-        isInPropertyFlow: true,
-        selectedProperty: undefined,
+        selectedProperty: conversationState?.selectedProperty,
         proposedTime: undefined,
+        lastIntent: "booking_started_via_affirmation",
+      });
+      appendConversationMessage(session.sid, { role: "user", content: sanitizedMessage });
+    }
+
+    const selectedProperty = conversationState?.selectedProperty;
+    const timePreference = extractTime(sanitizedMessage) || extractNaturalTimePreference(sanitizedMessage);
+
+    if (selectedProperty && timePreference) {
+      const reply = `Perfekt, hier die Zusammenfassung:\n\n• Immobilie: ${selectedProperty}\n• Termin: ${timePreference}\n\nEin Ansprechpartner wird sich zur Bestätigung bei Ihnen melden.`;
+
+      if (session?.sid) {
+        updateConversationState(session.sid, {
+          isBooking: false,
+          selectedProperty,
+          proposedTime: timePreference,
+        });
+        appendConversationMessage(session.sid, {
+          role: "assistant",
+          content: reply,
+        });
+      }
+
+      return NextResponse.json(
+        { reply },
+        { headers: buildSecurityHeaders() }
+      );
+    }
+
+    // Otherwise, transition to booking and ask for time
+    if (session?.sid) {
+      appendConversationMessage(session.sid, {
+        role: "assistant",
+        content: "Perfekt. Wann passt es Ihnen für die Besichtigung?",
       });
     }
 
     return NextResponse.json(
-      { reply: "Gerne. Für welche Immobilie möchten Sie einen Besichtigungstermin vereinbaren?" },
+      { reply: "Perfekt. Wann passt es Ihnen für die Besichtigung?" },
       { headers: buildSecurityHeaders() }
     );
-  }
+}
 
-  if (isPromptInjectionAttempt(sanitizedMessage)) {
-    await logSecurityEvent("warn", "prompt_injection_detected", {
-      requestId,
-      ip: maskIp(ip),
-      bucket: authBucket,
+if (isPromptInjectionAttempt(sanitizedMessage)) {
+  await logSecurityEvent("warn", "prompt_injection_detected", {
+    requestId,
+    ip: maskIp(ip),
+    bucket: authBucket,
+  });
+
+  return NextResponse.json(
+    { reply: "Ich kann keine Anweisungen ausführen, die Sicherheitsregeln umgehen. Bitte stellen Sie Ihre Immobilienfrage direkt." },
+    { status: 400, headers: buildSecurityHeaders() }
+  );
+}
+
+if (isDetailQuestion(sanitizedMessage) && (conversationState?.selectedProperty || conversationState?.isInPropertyFlow)) {
+  const selectedProperty = getPropertyByTitle(conversationState?.selectedProperty);
+  const reply = getDetailQuestionReply(selectedProperty);
+
+  await logSecurityEvent("info", "detail_question_answered", {
+    requestId,
+    ip: maskIp(ip),
+    bucket: authBucket,
+    property: selectedProperty?.title || conversationState?.selectedProperty || "unknown",
+  });
+
+  if (session?.sid) {
+    updateConversationState(session.sid, {
+      isInPropertyFlow: true,
+      lastIntent: "detail_question",
     });
-
-    return NextResponse.json(
-      { reply: "Ich kann keine Anweisungen ausführen, die Sicherheitsregeln umgehen. Bitte stellen Sie Ihre Immobilienfrage direkt." },
-      { status: 400, headers: buildSecurityHeaders() }
-    );
+    appendConversationMessage(session.sid, { role: "user", content: sanitizedMessage });
+    appendConversationMessage(session.sid, { role: "assistant", content: reply });
   }
 
- if (!isRelevantTopic(sanitizedMessage) && !conversationState?.isInPropertyFlow) {
-    await logSecurityEvent("info", "irrelevant_topic", {
-      requestId,
-      ip: maskIp(ip),
-      bucket: authBucket,
+  return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+}
+
+// --- Location-based Filtering (before off-topic/RAG) - Skip if time intent detected ---
+const rooms = extractRooms(sanitizedMessage);
+const maxPrice = extractMaxPrice(sanitizedMessage);
+const searchLocation = extractSearchLocation(sanitizedMessage);
+const hasPropertyFilters = rooms !== null || maxPrice !== null || searchLocation !== null;
+const filteredProperties = applyFilters(sanitizedMessage, properties);
+
+// Detect explicit request for properties outside Vienna
+const wantsOutsideWien = isOutsideOfCityRequest(sanitizedMessage, "wien");
+
+if (!isTimeIntent(sanitizedMessage) && !conversationState?.isBooking && (hasPropertyFilters || conversationState?.isInPropertyFlow || wantsOutsideWien)) {
+  await logSecurityEvent("info", "location_filter_applied", {
+    requestId,
+    ip: maskIp(ip),
+    bucket: authBucket,
+    location: searchLocation || "any",
+    rooms: rooms ?? "any",
+    maxPrice: maxPrice ?? "any",
+  });
+
+  await logSecurityEvent("info", "search_filter_applied", {
+    requestId,
+    ip: maskIp(ip),
+    bucket: authBucket,
+    location: searchLocation || "any",
+    rooms: rooms ?? "any",
+    maxPrice: maxPrice ?? "any",
+  });
+
+  // If user asked for properties outside Vienna explicitly, show non-Wien objects
+  if (wantsOutsideWien) {
+    const outsideProps = properties.filter((p) => !p.location.toLowerCase().includes("wien"));
+    if (outsideProps.length === 0) {
+      const reply = "Leider habe ich derzeit keine Immobilien außerhalb von Wien in der Liste. Möchten Sie stattdessen in Wien suchen oder das Budget/den Typ ändern?";
+      if (session?.sid) {
+        updateConversationState(session.sid, { isInPropertyFlow: true });
+        appendConversationTurn(session.sid, sanitizedMessage, reply);
+      }
+      return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+    }
+
+    const reply = `Ich habe folgende passende Immobilien außerhalb von Wien für Sie:\n\n${formatPropertyList(outsideProps)}\n\nMöchten Sie einen Besichtigungstermin vereinbaren?`;
+
+    if (session?.sid) {
+      updateConversationState(session.sid, {
+        isInPropertyFlow: true,
+        lastIntent: "search_outside_city",
+        ...(outsideProps.length === 1
+          ? {
+              selectedProperty: outsideProps[0]?.title,
+              selectedLocation: outsideProps[0]?.location,
+            }
+          : {}),
+      });
+      appendConversationTurn(session.sid, sanitizedMessage, reply);
+    }
+
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  if (hasPropertyFilters && filteredProperties.length === 0) {
+    const reply = "Leider habe ich aktuell keine passenden Immobilien für diese Kriterien. Möchten Sie die Suche etwas anpassen (z. B. Budget oder Zimmeranzahl)?";
+
+    if (session?.sid) {
+      updateConversationState(session.sid, { isInPropertyFlow: true });
+      appendConversationTurn(session.sid, sanitizedMessage, reply);
+    }
+
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  const propertiesToShow = hasPropertyFilters ? filteredProperties : properties;
+
+  const reply = `${hasPropertyFilters && searchLocation
+    ? `Ich habe folgende passende Immobilien in ${searchLocation} für Sie:`
+    : hasPropertyFilters && rooms !== null
+      ? `Ich habe folgende passende ${rooms}-Zimmer-Immobilien für Sie:`
+      : hasPropertyFilters && maxPrice !== null
+        ? `Ich habe folgende passende Immobilien unter ${maxPrice} für Sie:`
+        : "Ich habe folgende Immobilien für Sie:"}\n\n${formatPropertyList(propertiesToShow)}\n\nMöchten Sie einen Besichtigungstermin vereinbaren?`;
+
+  if (session?.sid) {
+    updateConversationState(session.sid, {
+      isInPropertyFlow: true,
+      lastIntent: hasPropertyFilters ? "search_filter" : "property_flow",
+        ...(propertiesToShow.length === 1
+          ? {
+              selectedProperty: propertiesToShow[0]?.title,
+              selectedLocation: propertiesToShow[0]?.location,
+            }
+          : {}),
     });
-
-    return NextResponse.json(
-      { reply: getOffTopicReply() },
-      { headers: buildSecurityHeaders() }
-    );
+    appendConversationTurn(session.sid, sanitizedMessage, reply);
   }
 
-  try {
+  return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+}
+
+if (!isRelevantTopic(sanitizedMessage) && !conversationState?.isInPropertyFlow) {
+  await logSecurityEvent("info", "irrelevant_topic", {
+    requestId,
+    ip: maskIp(ip),
+    bucket: authBucket,
+  });
+
+  return NextResponse.json(
+    { reply: getOffTopicReply() },
+    { headers: buildSecurityHeaders() }
+  );
+}
+
+try {
     const endpoint = process.env.AZURE_OPENAI_ENDPOINT?.replace(/\/$/, "");
     const apiKey = process.env.AZURE_OPENAI_API_KEY;
     const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
@@ -1037,74 +2080,63 @@ if (conversationState?.isLead) {
       );
     }
 
-    // --- Location-based Filtering ---
-    const location = extractLocation(sanitizedMessage);
-    if (location || conversationState?.isInPropertyFlow) {
-      // If location present, apply filter; if only in flow, show all properties (or refine other filters later)
-      await logSecurityEvent("info", "location_filter_applied", {
+    const url = `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
+    // If booking is active, skip RAG/LLM and return a booking-oriented fallback
+    if (conversationState?.isBooking) {
+      return NextResponse.json(
+        {
+          reply: "Für welche Immobilie möchten Sie einen Termin vereinbaren oder wann passt es Ihnen zeitlich?",
+        },
+        { headers: buildSecurityHeaders() }
+      );
+    }
+
+    const ragChunks = await retrieveRelevantChunks(sanitizedMessage, RAG_TOP_K);
+    const ragContext = buildRagContext(ragChunks);
+    const memoryMessages = getRecentConversationMessages(session?.sid);
+    const { context: filteredContext, found: filteredFound } = buildContextFromList(filteredProperties);
+    const { context: fallbackContext, found: fallbackFound } = hasPropertyFilters
+      ? { context: filteredContext, found: filteredFound }
+      : buildContext(sanitizedMessage);
+    const context = ragContext || fallbackContext;
+    const found = ragChunks.length > 0 || fallbackFound;
+
+    // 🔹 Falls KEIN direkter Match → nicht sofort abbrechen!
+    if (!found) {
+      await logSecurityEvent("info", "no_rag_match", {
         requestId,
         ip: maskIp(ip),
         bucket: authBucket,
-        location: location || "any",
       });
 
-      const filtered = properties.filter((p) =>
-        location ? p.location.toLowerCase().includes(location.toLowerCase()) : true
-      );
-
-      if (filtered.length > 0) {
-        const formatted = formatPropertyList(filtered);
-        const reply = location
-          ? `Ich habe folgende passende Immobilien in ${location} für Sie:\n\n${formatted}\n\nMöchten Sie einen Besichtigungstermin vereinbaren?`
-          : `Ich habe folgende Immobilien für Sie:\n\n${formatted}\n\nMöchten Sie einen Besichtigungstermin vereinbaren?`;
-
-        if (session?.sid) {
-          updateConversationState(session.sid, { isInPropertyFlow: true });
-        }
-
-        return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
-      }
-
-      const reply = location
-        ? `Leider habe ich aktuell keine Immobilien in ${location} verfügbar. Möchten Sie andere Standorte anschauen?`
-        : `Leider habe ich aktuell keine passenden Immobilien. Möchten Sie andere Kriterien versuchen?`;
-
-      return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
-    }
-
-    const url = `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
-const { context, found } = buildContext(sanitizedMessage);
-
-// 🔹 Falls KEIN direkter Match → nicht sofort abbrechen!
-if (!found) {
-  await logSecurityEvent("info", "no_rag_match", {
-    requestId,
-    ip: maskIp(ip),
-    bucket: authBucket,
-  });
-
-  // 🔥 Fallback: zeige einfach Standard-Immobilien (statt Fehler)
-  const fallbackProperties = properties.slice(0, 3);
-
-const formatted = fallbackProperties.map(p => `
+      // 🔥 Fallback: zeige einfach Standard-Immobilien (statt Fehler)
+      const fallbackProperties = properties.slice(0, 3);
+      const formatted = fallbackProperties
+        .map(
+          (p) => `
 • ${p.title}  
   Ort: ${p.location}  
   Preis: ${p.price}  
   Größe: ${p.size}, ${p.rooms} Zimmer  
   Verfügbar: ${p.available}  
-`).join("\n");
+`
+        )
+        .join("\n");
 
-  if (session?.sid) {
-    updateConversationState(session.sid, { isInPropertyFlow: true });
-  }
+      const reply = `Ich habe aktuell folgende Immobilien für Sie:\n${formatted}\n\nWenn Sie möchten, kann ich die Auswahl genauer auf Ihre Wünsche abstimmen (z. B. Ort, Budget oder Größe).`;
 
-  return NextResponse.json(
-    {
-      reply: `Ich habe aktuell folgende Immobilien für Sie:\n${formatted}\n\nWenn Sie möchten, kann ich die Auswahl genauer auf Ihre Wünsche abstimmen (z. B. Ort, Budget oder Größe).`,
-    },
-    { status: 200, headers: buildSecurityHeaders() }
-  );
-}
+      if (session?.sid) {
+        updateConversationState(session.sid, { isInPropertyFlow: true });
+        appendConversationTurn(session.sid, sanitizedMessage, reply);
+      }
+
+      return NextResponse.json(
+        {
+          reply,
+        },
+        { status: 200, headers: buildSecurityHeaders() }
+      );
+    }
 
     await logSecurityEvent("info", "azure_request", {
       requestId,
@@ -1115,16 +2147,16 @@ const formatted = fallbackProperties.map(p => `
     });
 
     const response = await fetch(url, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "api-key": apiKey,
-  },
-  body: JSON.stringify({
-    messages: [
-      {
-        role: "system",
-        content: `Sie sind ein professioneller, freundlicher und effizienter digitaler Immobilienberater.
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": apiKey,
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            role: "system",
+            content: `Sie sind ein digitaler Immobilien-Assistent, der Nutzer dabei unterstützt, passende Objekte zu finden und Besichtigungstermine zu organisieren.
 
 Ziel:
 Unterstützen Sie Nutzer dabei, schnell passende Immobilien zu finden und führen Sie sie zu einer konkreten nächsten Aktion (z. B. Besichtigungstermin, Kontaktaufnahme).
@@ -1168,20 +2200,21 @@ Wenn keine passenden Informationen vorhanden sind:
 
 Wichtig:
 - Jede Antwort soll, wenn möglich, einen klaren nächsten Schritt enthalten.`,
-      },
-      {
-        role: "system",
-        content: `Verfügbare Immobilien:\n\n${context}`,
-      },
-      {
-        role: "user",
-        content: sanitizedMessage,
-      },
-    ],
-    temperature: 0.3,
-    max_tokens: 400,
-  }),
-});
+          },
+          {
+            role: "system",
+            content: `Verfügbare Immobilien:\n\n${context}`,
+          },
+          ...memoryMessages.slice(-6),
+          {
+            role: "user",
+            content: sanitizedMessage,
+          },
+        ],
+        temperature: 0.3,
+        max_tokens: 400,
+      }),
+    });
 
     if (!response.ok) {
       await logSecurityEvent("error", "azure_error", {
@@ -1208,6 +2241,7 @@ Wichtig:
 
     if (session?.sid) {
       updateConversationState(session.sid, { isInPropertyFlow: true });
+      appendConversationTurn(session.sid, sanitizedMessage, normalizedReply);
     }
 
     await logSecurityEvent("info", "request_success", {
