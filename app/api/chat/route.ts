@@ -31,7 +31,7 @@ type ConversationState = {
 type FitnessOffer = (typeof fitness)[number];
 
 const RATE_LIMIT_WINDOW_MS = 90_000;
-const RATE_LIMIT_MAX = 9;
+const RATE_LIMIT_MAX = 15;
 const CONVERSATION_STATE_TTL_MS = 1000 * 60 * 60 * 24;
 const MAX_CONVERSATION_MESSAGES = 8;
 const requestLog: Map<string, number[]> = new Map();
@@ -202,6 +202,9 @@ function isIdentityQuestion(message: string): boolean {
   return containsAny(message, ["wer bist du", "wer sind sie", "was bist du", "was ist dein name", "wie heißt du", "wo bist du"]);
 }
 
+
+
+
 function isInfoQuestion(message: string): boolean {
   return containsAny(message, [
     "öffnungszeiten",
@@ -252,6 +255,17 @@ function isFitnessTopic(message: string): boolean {
     "training",
   ]);
 }
+
+
+function isCapabilityQuestion(message: string): boolean {
+  return containsAny(message, [
+    "was kannst du",
+    "was kannst du machen",
+    "wie kannst du helfen",
+    "wobei kannst du helfen",
+  ]);
+}
+
 
 function extractTime(message: string): string | null {
   const explicit = message.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
@@ -613,6 +627,7 @@ export async function POST(req: NextRequest) {
   const infoQuestion = isInfoQuestion(sanitizedMessage);
   const explicitBookingIntent = isBookingIntent(sanitizedMessage) || isYesIntent(sanitizedMessage) || Boolean(requestedTime);
   const simpleProbetrainingIntent = isProbetrainingRequest(sanitizedMessage) || (isYesIntent(sanitizedMessage) && !bookingContinuation);
+  const capabilityQuestion = isCapabilityQuestion(sanitizedMessage);
 
   if (identityQuestion) {
     const reply = "Ich bin Samy, der digitale Assistent deines Fitnessstudios und helfe dir gerne bei Fragen rund um Training, Mitgliedschaften und Probetrainings.";
@@ -623,6 +638,17 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
   }
+
+  if (capabilityQuestion) {
+  const reply =
+    "Ich helfe dir gerne bei allem rund ums Fitnessstudio – zum Beispiel bei Preisen, Mitgliedschaften, Kursen oder einem kostenlosen Probetraining.";
+
+  if (sessionId) {
+    appendConversationTurn(sessionId, sanitizedMessage, reply);
+  }
+
+  return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+}
 
   if (isGreetingOnly(sanitizedMessage)) {
     const reply = "Hallo! Wie kann ich dir bei Fitness, Preisen oder einem Probetraining helfen?";
