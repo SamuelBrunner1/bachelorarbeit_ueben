@@ -1,0 +1,32 @@
+[
+  {
+    "id": "fit-001",
+    "title": "Basic Fitness Mitgliedschaft",
+    "price": "EUR 39 / Monat",
+    "location": "Wien, Studio Mitte",
+    "description": "Zugang zum Trainingsbereich, Cardio-Zone und freien Geräteflächen. Ideal für Einsteigerinnen und Einsteiger.",
+    "available": "Sofort",
+    "size": "1.200 m²",
+    "rooms": 3
+  },
+  {
+    "id": "fit-002",
+    "title": "Premium Mitgliedschaft mit Kursen",
+    "price": "EUR 59 / Monat",
+    "location": "Wien, 1070 Neubau",
+    "description": "Enthält Gruppenkurse, Sauna, Premium-Geräte und flexible Check-ins. Perfekt für regelmäßiges Training.",
+    "available": "Sofort",
+    "size": "1.600 m²",
+    "rooms": 5
+  },
+  {
+    "id": "fit-003",
+    "title": "Probetraining mit Coach",
+    "price": "EUR 0 / Termin",
+    "location": "Graz, Lend",
+    "description": "Kostenloses Probetraining mit kurzer Einweisung und Beratung zu passenden Mitgliedschaften.",
+    "available": "Jeden Werktag",
+    "size": "450 m²",
+    "rooms": 2
+  }
+]

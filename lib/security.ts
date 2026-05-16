@@ -18,7 +18,19 @@ export function getAllowedOrigins(): string[] {
 
 export function isOriginAllowed(origin: string | null): boolean {
   if (!origin) return true;
-  return getAllowedOrigins().includes(origin);
+
+  const allowed = getAllowedOrigins();
+  if (allowed.includes(origin)) return true;
+
+  // Allow localhost and 127.0.0.1 with any port during development
+  try {
+    const u = new URL(origin);
+    if (u.hostname === "localhost" || u.hostname === "127.0.0.1") return true;
+  } catch {
+    // ignore parse errors
+  }
+
+  return false;
 }
 
 export function buildSecurityHeaders(): Record<string, string> {

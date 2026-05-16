@@ -76,6 +76,7 @@ export default function ChatWidget() {
     {/* Chat-Bereich */}
     <div className="flex-1 overflow-hidden bg-linear-to-b from-white to-blue-50/50">
       <iframe
+        ref={iframeRef}
         src="/chatbot"
         className="w-full h-full border-0"
         style={{
@@ -106,6 +107,7 @@ export default function ChatWidget() {
 
     {/* Chat-Bereich */}
     <iframe
+      ref={iframeRef}
       src="/chatbot"
       className="w-full h-full border-0 rounded-b-2xl"
     ></iframe>

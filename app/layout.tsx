@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Immobotneu",
-  description: "Immobilien- und Chatbot-Demo mit Azure OpenAI",
+  title: "Fitnessstudio Demo",
+  description: "Fitnessstudio-Demo mit Mitgliedschaften, Kursen und Chatbot",
 };
 
 export default function RootLayout({

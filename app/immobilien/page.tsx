@@ -1,6 +1,6 @@
 import IndustryChat from "@/components/IndustryChat";
 
-export default function ChatbotPage() {
+export default function ImmobilienPage() {
   return (
     <IndustryChat
       title="Fitness Vienna"
