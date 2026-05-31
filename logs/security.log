@@ -364,3 +364,4 @@
 {"timestamp":"2026-05-15T12:53:11.229Z","level":"warn","event":"unauthorized_request","requestId":"1be5ae21-a102-4e19-b8b1-ccb136c7c6b8","ip":"127.0.0.x","origin":"http://localhost:3000"}
 {"timestamp":"2026-05-15T13:15:53.760Z","level":"warn","event":"cors_rejected","requestId":"75810f1a-1417-4c07-9c60-43daa69510e5","ip":"::1","origin":"http://localhost:3003"}
 {"timestamp":"2026-05-15T13:15:56.670Z","level":"warn","event":"cors_rejected","requestId":"d3b4aca2-12c8-4827-9969-2df69c5305d1","ip":"::1","origin":"http://localhost:3003"}
+{"timestamp":"2026-05-16T19:44:39.291Z","level":"warn","event":"rate_limited","requestId":"bea046b8-1e81-4f41-9e83-a056a414867c","ip":"::1","bucket":"session:235513ac-0d6a-436e-91fa-4f97c9c2bd43"}

@@ -76,12 +76,15 @@ describe("Chat API reply quality", () => {
     expect(reply).not.toContain("wann passt es dir");
   });
 
-  it("returns contact fallback", async () => {
+  it("returns soft off-topic fallback", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
     const res = await POST(createMockRequest("Erkläre mir bitte die Raumfahrt"));
     const reply = await readReply(res);
 
-    expect(reply).toContain("Das kann ich dir gerade nicht genau beantworten.");
-    expect(reply).toContain("📞 +43 1234567");
-    expect(reply).toContain("demo@email.com");
+    expect(reply).toContain("Bin mir gerade nicht ganz sicher");
+    expect(reply).toContain("Preise, Kurse oder ein Probetraining");
+    expect(reply).not.toContain("📞 +43 1234567");
+    expect(reply).not.toContain("demo@email.com");
   });
 });

@@ -31,32 +31,54 @@ type ConversationState = {
 type FitnessOffer = (typeof fitness)[number];
 
 const RATE_LIMIT_WINDOW_MS = 90_000;
-const RATE_LIMIT_MAX = 15;
+const RATE_LIMIT_MAX = 30;
 const CONVERSATION_STATE_TTL_MS = 1000 * 60 * 60 * 24;
 const MAX_CONVERSATION_MESSAGES = 8;
 const requestLog: Map<string, number[]> = new Map();
 const conversationStateLog: Map<string, ConversationState> = new Map();
 
-const SYSTEM_PROMPT = `Du bist ein freundlicher und professioneller Kundenberater eines Fitnessstudios.
+const SYSTEM_PROMPT = `
+Du bist Samy, der freundliche digitale Assistent eines Fitnessstudios.
 
-Deine Aufgabe:
-- beantworte Fragen zu unserem Fitnessstudio (Öffnungszeiten, Preise, Kurse, Anmeldung)
-- nutze ausschließlich bereitgestellte Informationen
-- erfinde keine Daten
+Du hilfst Besuchern bei Fragen zu:
+- Mitgliedschaften und Preisen
+- Öffnungszeiten
+- Kursen und Training
+- Probetraining und Anmeldung
 
-Verhalten:
-- kurz und klar (2–4 Sätze)
-- freundlich und natürlich
-- wie ein echter Mitarbeiter
+Du sprichst den Nutzer immer per Du an und antwortest wie ein echter Mitarbeiter – locker, freundlich und natürlich.
 
-WICHTIG:
-1. Wenn Infos vorhanden → konkrete Antwort + nächste Aktion (Probetraining)
-2. Wenn keine Infos → freundlich nach Details fragen
-3. Off-Topic → zurück zum Thema Fitness lenken
-4. Smalltalk → kurz + zurück zum Thema
-5. Wenn Nutzer Interesse an Termin zeigt:
-   → bestätigen ("vorgemerkt")
-   → Hinweis auf Bestätigungsmail`;
+Wichtig für dein Verhalten:
+
+- Antworte kurz und klar (max. 2–3 Sätze)
+- Gib konkrete Informationen, wenn sie vorhanden sind (z. B. Preise, Zeiten)
+- Wenn es passt, biete am Ende eine einfache nächste Aktion an (z. B. Probetraining)
+
+Probetraining:
+- Ein Probetraining ist kostenlos und jederzeit ohne Anmeldung möglich
+- Sag einfach, dass der Nutzer jederzeit vorbeikommen kann
+
+Anmeldung:
+- Anmeldung erfolgt direkt vor Ort
+- Benötigt werden Ausweis und Bankverbindung
+
+Wenn du etwas nicht weißt:
+- Sag ehrlich, dass du es nicht genau sagen kannst
+- Verweise freundlich auf Kontakt:
+  +43 1234567 oder demo@email.com
+
+Smalltalk:
+- Antworte kurz (z. B. „Alles gut 😄“)
+- leite dann wieder zum Thema Fitness über
+
+Off-Topic:
+- Sag freundlich, dass du dabei nicht helfen kannst
+- leite zurück zum Fitnessstudio
+
+Wichtig:
+- Erfinde keine Informationen
+- Bleib immer im Kontext Fitnessstudio
+`;
 
 function isCorsAllowed(origin: string | null): boolean {
   return isOriginAllowed(origin);
@@ -105,6 +127,20 @@ async function logSecurityEvent(
   } catch {
     // best-effort logging only
   }
+}
+
+
+function isSmalltalkMessage(message: string): boolean {
+  return containsAny(message, [
+    "wie gehts",
+    "wie geht es",
+    "alles gut",
+    "was geht",
+    "na",
+    "hi",
+    "hallo",
+    "hey"
+  ]);
 }
 
 function checkRateLimit(bucketKey: string): boolean {
@@ -194,16 +230,83 @@ function isGreetingOnly(message: string): boolean {
   return ["hallo", "hi", "servus", "hey", "guten tag"].includes(normalizeText(message));
 }
 
-function isSmalltalkMessage(message: string): boolean {
-  return containsAny(message, ["wie gehts", "wie geht es", "alles gut", "guten morgen", "guten abend"]);
-}
+
 
 function isIdentityQuestion(message: string): boolean {
   return containsAny(message, ["wer bist du", "wer sind sie", "was bist du", "was ist dein name", "wie heißt du", "wo bist du"]);
 }
 
+function isCapabilityQuestion(message: string): boolean {
+  return containsAny(message, [
+    "was kannst du",
+    "was kannst du machen",
+    "wie kannst du helfen",
+    "wobei kannst du helfen",
+  ]);
+}
+
+function isCourseQuestion(message: string): boolean {
+  return containsAny(message, ["kurs", "kurse", "yoga", "joga", "hiit", "spinning", "pilates"]);
+}
+
+function isOpeningHoursQuestion(message: string): boolean {
+  return containsAny(message, ["wann offen", "öffnungszeiten", "wochenende", "geöffnet", "offen"]);
+}
+
+function isProcessQuestion(message: string): boolean {
+  return containsAny(message, ["wie läuft das", "wie funktioniert", "ablauf", "wie geht das"]);
+}
+
+function isSaunaQuestion(message: string): boolean {
+  return normalizeText(message).includes("sauna");
+}
+
+function isLooseTimeMessage(message: string): boolean {
+  const normalized = normalizeText(message);
+  return ["morgen", "heute", "übermorgen", "uebermorgen"].includes(normalized);
+}
+
+function isCasualMessage(message: string): boolean {
+  return containsAny(message.toLowerCase(), [
+    "bro",
+    "bruder",
+    "digga",
+    "hä",
+    "lol",
+    "wtf",
+    "yo",
+    "ey",
+    "aha",
+    "ok",
+    "okay",
+  ]);
+}
+
+function getCasualReply(): string {
+  const replies = [
+    "Haha 😄 alles gut – was möchtest du wissen?",
+    "Alles entspannt 😄 Wobei kann ich dir helfen?",
+    "Alles gut 👍 Was interessiert dich – Training, Kurse oder Preise?",
+    "Haha 😄 alles klar – was möchtest du wissen?",
+  ];
+
+  return replies[Math.floor(Math.random() * replies.length)];
+}
+
+function getSmalltalkReply(): string {
+  return "Alles bestens! 😄 ich bin Samy der virtuelle Kundenservice, wie kann ich dir helfen?";
+}
 
 
+function isCheapRequest(message: string): boolean {
+  return containsAny(message, [
+    "günstig",
+    "billig",
+    "unter",
+    "preiswert",
+    "wenig geld",
+  ]);
+}
 
 function isInfoQuestion(message: string): boolean {
   return containsAny(message, [
@@ -221,12 +324,30 @@ function isInfoQuestion(message: string): boolean {
   ]);
 }
 
+
+function isWalkInQuestion(message: string): boolean {
+  return containsAny(message, [
+    "einfach kommen",
+    "vorbeikommen",
+    "ohne anmeldung",
+  ]);
+}
+
+
 function isInterestIntent(message: string): boolean {
   return containsAny(message, ["interesse", "interessiert", "vormerken", "probetraining", "anmeldung", "mitmachen", "einsteigen"]);
 }
 
 function isProbetrainingRequest(message: string): boolean {
   return containsAny(message, ["ich möchte ein probetraining", "ich will ein probetraining", "probetraining", "vorbeikommen", "kann ich vorbeikommen"]);
+}
+
+function isPersonalTrainingQuestion(message: string): boolean {
+  return containsAny(message, [
+    "personal training",
+    "trainer",
+    "coach",
+  ]);
 }
 
 function isBookingIntent(message: string): boolean {
@@ -238,32 +359,61 @@ function isYesIntent(message: string): boolean {
 }
 
 function isFitnessTopic(message: string): boolean {
-  return containsAny(message, [
-    "fitness",
-    "studio",
-    "mitgliedschaft",
-    "mitgliedschaften",
+  const m = message.toLowerCase();
+
+  return [
+    // Preise / Mitgliedschaft
+    "preis",
+    "kost",
+    "mitglied",
+    "abo",
+    "tarif",
+    "gebühr",
+
+    // Training / Angebot
+    "training",
+    "trainieren",
     "kurs",
     "kurse",
-    "preis",
-    "preise",
-    "kosten",
-    "öffnungszeiten",
-    "oeffnungszeiten",
-    "anmeldung",
+    "yoga",
+    "hiit",
+    "fitness",
+    "studio",
+
+    // Probetraining / Anmeldung
     "probetraining",
-    "training",
-  ]);
-}
+    "anmelden",
+    "anmeldung",
+    "mitglied werden",
+    "beitreten",
 
+    // Zeit / Öffnungszeiten
+    "wann",
+    "zeit",
+    "uhr",
+    "offen",
+    "geöffnet",
+    "öffnung",
+    "öffnet",
 
-function isCapabilityQuestion(message: string): boolean {
-  return containsAny(message, [
-    "was kannst du",
-    "was kannst du machen",
-    "wie kannst du helfen",
-    "wobei kannst du helfen",
-  ]);
+    // Ort
+    "wo",
+    "standort",
+    "adresse",
+
+    // Preisbezogen (locker formuliert)
+    "günstig",
+    "billig",
+    "teuer",
+    "unter",
+    "angebot",
+    "rabatt",
+    "student",
+
+    // Personal Training
+    "trainer",
+    "personal training",
+  ].some((k) => m.includes(k));
 }
 
 
@@ -339,6 +489,8 @@ function getOfferByIntent(message: string, state?: ConversationState): FitnessOf
     return fitness.find((entry) => normalizeText(entry.title).includes("probetraining")) || null;
   }
 
+  
+
   if (normalized.includes("kurs") || normalized.includes("premium")) {
     return fitness.find((entry) => normalizeText(entry.title).includes("premium")) || fitness[0] || null;
   }
@@ -379,7 +531,7 @@ function buildInfoReply(message: string): string {
     return "Wir haben Montag bis Sonntag von 06:00 bis 22:00 Uhr geöffnet. An Feiertagen sind wir von 08:00 bis 18:00 Uhr für dich da.";
   }
 
-  if (normalized.includes("kurs")) {
+  if (normalized.includes("kurs") || normalized.includes("yoga") || normalized.includes("hiit") || normalized.includes("spinning") || normalized.includes("pilates")) {
     return "Unsere Kurse sind Yoga, HIIT, Spinning, Functional Training und Pilates. Kurse finden täglich vormittags und abends statt.";
   }
 
@@ -399,7 +551,15 @@ function buildInfoReply(message: string): string {
 }
 
 function buildOffTopicReply(): string {
-  return "Das kann ich dir gerade nicht genau beantworten. Melde dich gerne direkt bei uns:\n\n📞 +43 1234567\n📧 demo@email.com";
+  const replies = [
+    "Bin mir gerade nicht ganz sicher 😄 Geht es bei dir um Preise, Kurse oder ein Probetraining?",
+    "Hilf mir kurz 😄 Geht es um Training, Mitgliedschaften oder Kurse?",
+    "Was interessiert dich genau? 😊 Preise, Kurse oder einfach mal vorbeikommen?",
+    "Sag mir kurz, was dich interessiert – dann helfe ich dir direkt 👍",
+    "Meinst du Training, Preise oder Kurse? 😄",
+  ];
+
+  return replies[Math.floor(Math.random() * replies.length)];
 }
 
 function buildKnowledgeContext(message: string): string {
@@ -438,7 +598,15 @@ function buildKnowledgeContext(message: string): string {
 function buildFallbackReply(message: string, knowledgeContext: string): string {
   void message;
   void knowledgeContext;
-  return "Das kann ich dir gerade nicht genau beantworten. Melde dich gerne direkt bei uns:\n\n📞 +43 1234567\n📧 demo@email.com";
+  const replies = [
+    "Bin mir gerade nicht ganz sicher 😄 Geht es bei dir um Preise, Kurse oder ein Probetraining?",
+    "Hilf mir kurz 😄 Geht es um Training, Mitgliedschaften oder Kurse?",
+    "Was interessiert dich genau? 😊 Preise, Kurse oder einfach mal vorbeikommen?",
+    "Sag mir kurz, was dich interessiert – dann helfe ich dir direkt 👍",
+    "Meinst du Training, Preise oder Kurse? 😄",
+  ];
+
+  return replies[Math.floor(Math.random() * replies.length)];
 }
 
 function isGenericMockReply(reply: string): boolean {
@@ -624,10 +792,28 @@ export async function POST(req: NextRequest) {
   const requestedTime = extractTime(sanitizedMessage);
   const bookingContinuation = Boolean(currentState?.isBooking);
   const identityQuestion = isIdentityQuestion(sanitizedMessage);
-  const infoQuestion = isInfoQuestion(sanitizedMessage);
-  const explicitBookingIntent = isBookingIntent(sanitizedMessage) || isYesIntent(sanitizedMessage) || Boolean(requestedTime);
-  const simpleProbetrainingIntent = isProbetrainingRequest(sanitizedMessage) || (isYesIntent(sanitizedMessage) && !bookingContinuation);
   const capabilityQuestion = isCapabilityQuestion(sanitizedMessage);
+  const courseQuestion = isCourseQuestion(sanitizedMessage);
+  const openingHoursQuestion = isOpeningHoursQuestion(sanitizedMessage);
+  const processQuestion = isProcessQuestion(sanitizedMessage);
+  const saunaQuestion = isSaunaQuestion(sanitizedMessage);
+  const looseTimeMessage = isLooseTimeMessage(sanitizedMessage);
+  const infoQuestion = isInfoQuestion(sanitizedMessage);
+  const normalizedMessage = normalizeText(sanitizedMessage);
+  const hasCoursePriceCombo =
+    (normalizedMessage.includes("yoga") || normalizedMessage.includes("kurs")) &&
+    (normalizedMessage.includes("kost") || normalizedMessage.includes("teuer") || normalizedMessage.includes("preis"));
+  const hasYogaWhenCombo = normalizedMessage.includes("yoga") && normalizedMessage.includes("wann");
+  const hasPriceTimeCombo =
+    normalizedMessage.includes("kost") &&
+    (normalizedMessage.includes("morgen") || normalizedMessage.includes("kommen"));
+  const isShortMessage = sanitizedMessage.length < 20;
+  const explicitBookingIntent =
+    isBookingIntent(sanitizedMessage) ||
+    (isYesIntent(sanitizedMessage) && bookingContinuation) ||
+    (Boolean(requestedTime) && bookingContinuation);
+  const simpleProbetrainingIntent = isProbetrainingRequest(sanitizedMessage) || (isYesIntent(sanitizedMessage) && !bookingContinuation);
+  const cheapRequest = isCheapRequest(sanitizedMessage);
 
   if (identityQuestion) {
     const reply = "Ich bin Samy, der digitale Assistent deines Fitnessstudios und helfe dir gerne bei Fragen rund um Training, Mitgliedschaften und Probetrainings.";
@@ -656,8 +842,88 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
   }
 
-  if (isSmalltalkMessage(sanitizedMessage)) {
-    const reply = "Danke der Nachfrage, alles gut. Wobei kann ich dir bei unserem Fitnessstudio helfen?";
+  if (courseQuestion && !hasCoursePriceCombo && !hasYogaWhenCombo) {
+    const reply = "Wir bieten Kurse wie Yoga, HIIT, Spinning und Pilates an. Diese finden täglich vormittags und abends statt.";
+    if (sessionId) appendConversationTurn(sessionId, sanitizedMessage, reply);
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  if (openingHoursQuestion && !hasYogaWhenCombo) {
+    const reply = "Wir haben Montag bis Sonntag von 06:00 bis 22:00 Uhr geöffnet. Am Wochenende also ganz normal 😊";
+    if (sessionId) appendConversationTurn(sessionId, sanitizedMessage, reply);
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  if (processQuestion) {
+    const reply = "Du kannst einfach vorbeikommen, dich kurz anmelden und direkt starten. Ein Trainer hilft dir am Anfang gerne.";
+    if (sessionId) appendConversationTurn(sessionId, sanitizedMessage, reply);
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  if (isPersonalTrainingQuestion(sanitizedMessage)) {
+    const reply = "Ja, wir bieten auch Personal Training an. Die Preise starten ab 60€ pro Einheit. Wenn du möchtest, kann ich dir mehr dazu erzählen oder dir den Einstieg erleichtern.";
+    if (sessionId) appendConversationTurn(sessionId, sanitizedMessage, reply);
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  if (isWalkInQuestion(sanitizedMessage)) {
+    const reply = "Sehr gerne! Du kannst jederzeit ohne Anmeldung für ein Probetraining vorbeikommen. Wenn du möchtest, kann ich dir vorab noch etwas zum Training oder zu unseren Angeboten erklären.";
+    if (sessionId) appendConversationTurn(sessionId, sanitizedMessage, reply);
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  if (saunaQuestion) {
+    const reply = "Aktuell haben wir keine Sauna. Wenn du Fragen zu Training oder Kursen hast, helfe ich dir gerne weiter.";
+    if (sessionId) appendConversationTurn(sessionId, sanitizedMessage, reply);
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  if (hasYogaWhenCombo) {
+    const reply = "Wir bieten Yoga-Kurse an. Wir haben täglich von 06:00 bis 22:00 Uhr geöffnet.";
+    if (sessionId) appendConversationTurn(sessionId, sanitizedMessage, reply);
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  if (hasCoursePriceCombo) {
+    const reply = "Wir bieten Kurse wie Yoga, HIIT und Spinning an. Die Mitgliedschaften starten ab 29€ pro Monat.";
+    if (sessionId) appendConversationTurn(sessionId, sanitizedMessage, reply);
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  if (hasPriceTimeCombo) {
+    const reply = "Unsere Mitgliedschaften starten ab 29€ pro Monat. Du kannst jederzeit ohne Anmeldung vorbeikommen und direkt starten 😊";
+    if (sessionId) appendConversationTurn(sessionId, sanitizedMessage, reply);
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  if (looseTimeMessage) {
+    const reply = "Du kannst jederzeit während unserer Öffnungszeiten vorbeikommen 😊 Wir haben täglich von 06:00 bis 22:00 Uhr geöffnet.";
+    if (sessionId) appendConversationTurn(sessionId, sanitizedMessage, reply);
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  if (isCasualMessage(sanitizedMessage)) {
+    const reply = getCasualReply();
+
+    if (sessionId) {
+      appendConversationTurn(sessionId, sanitizedMessage, reply);
+    }
+
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  if (cheapRequest) {
+    const reply = `Unsere günstigste Mitgliedschaft ist:\n\n• Basic – 29€ pro Monat  \n\nDu kannst auch jederzeit kostenlos ein Probetraining machen und dir alles anschauen.`;
+
+    if (sessionId) {
+      appendConversationTurn(sessionId, sanitizedMessage, reply);
+    }
+
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  }
+
+  if (isSmalltalkMessage(sanitizedMessage) && isShortMessage) {
+    const reply = getSmalltalkReply();
     if (sessionId) appendConversationTurn(sessionId, sanitizedMessage, reply);
     return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
   }
@@ -692,16 +958,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
   }
 
-  if (explicitBookingIntent || (bookingContinuation && !infoQuestion)) {
+  if (bookingContinuation && !explicitBookingIntent && !infoQuestion) {
+    if (sessionId) {
+      updateConversationState(sessionId, { isBooking: false });
+    }
+  }
+
+  if (explicitBookingIntent || (bookingContinuation && isBookingIntent(sanitizedMessage))) {
     const bookingState = resolveBookingFlow(sanitizedMessage, currentState);
+
     if (sessionId) {
       updateConversationState(sessionId, bookingState.nextState);
       appendConversationTurn(sessionId, sanitizedMessage, bookingState.reply);
     }
 
-    return NextResponse.json({ reply: bookingState.reply }, { headers: buildSecurityHeaders() });
+    return NextResponse.json(
+      { reply: bookingState.reply },
+      { headers: buildSecurityHeaders() }
+    );
   }
-
   if (/günstigste|billigste|am günstigsten|am billigsten/.test(normalizeText(sanitizedMessage))) {
     const cheapest = getOfferByPrice(true);
     if (cheapest) {
@@ -738,12 +1013,18 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const knowledgeContext = buildKnowledgeContext(sanitizedMessage);
-  if (!isFitnessTopic(sanitizedMessage) && !knowledgeContext) {
-    const reply = buildOffTopicReply();
-    if (sessionId) appendConversationTurn(sessionId, sanitizedMessage, reply);
-    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+const knowledgeContext = buildKnowledgeContext(sanitizedMessage);
+
+// Nur OffTopic wenn wirklich gar nichts passt
+if (!isFitnessTopic(sanitizedMessage) && !knowledgeContext) {
+  const reply = buildOffTopicReply();
+
+  if (sessionId) {
+    appendConversationTurn(sessionId, sanitizedMessage, reply);
   }
+
+  return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+}
 
   const recentMessages = getRecentConversationMessages(sessionId);
   const llmReply = await generateFitnessReply(sanitizedMessage, knowledgeContext, recentMessages);
@@ -759,4 +1040,4 @@ export async function POST(req: NextRequest) {
 
 export async function OPTIONS() {
   return NextResponse.json({}, { headers: buildSecurityHeaders() });
-}
+  }
