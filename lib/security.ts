@@ -9,7 +9,9 @@ export function isProduction(): boolean {
 }
 
 export function getAllowedOrigins(): string[] {
-  const configured = process.env.ALLOWED_ORIGINS || "http://localhost:3000,http://localhost:3001,http://72.62.37.25:3000,http://brunner-software.com,http://www.brunner-software.com";
+const configured =
+  process.env.ALLOWED_ORIGINS ||
+  "http://localhost:3000,http://localhost:3001,https://brunner-software.com,https://www.brunner-software.com";
   return configured
     .split(",")
     .map((origin) => origin.trim())
