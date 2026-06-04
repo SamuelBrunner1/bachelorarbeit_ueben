@@ -45,20 +45,33 @@ export function buildSecurityHeaders(): Record<string, string> {
   };
 
   if (isProduction()) {
-    headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains";
+    headers["Strict-Transport-Security"] =
+      "max-age=63072000; includeSubDomains";
+
     headers["Content-Security-Policy"] = [
       "default-src 'self'",
       "base-uri 'self'",
       "object-src 'none'",
       "frame-ancestors 'self'",
-      "frame-src 'self'",
       "form-action 'self'",
-      "connect-src 'self'",
-      "img-src 'self' data:",
-      "font-src 'self' data:",
+
+      // Next.js Runtime / API / WebSockets
+      "connect-src 'self' https: wss:",
+
+      // Bilder
+      "img-src 'self' data: blob: https:",
+
+      // Fonts
+      "font-src 'self' data: https:",
+
+      // Tailwind / Next.js Styles
       "style-src 'self' 'unsafe-inline'",
-      "script-src 'self'",
-      "upgrade-insecure-requests",
+
+      // Next.js benötigt oft Inline Runtime Scripts
+      "script-src 'self' 'unsafe-inline'",
+
+      // Web Worker
+      "worker-src 'self' blob:",
     ].join("; ");
   }
 
