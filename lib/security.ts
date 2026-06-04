@@ -165,7 +165,7 @@ export function getSessionCookieOptions() {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: isProduction(),
+    secure: false,
     path: "/",
     maxAge: 60 * 60 * 24 * 7,
   };
