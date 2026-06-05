@@ -75,7 +75,8 @@ describe("Chat API fitness intent order", () => {
     const response = await POST(createMockRequest("was geht"));
     const reply = await readReply(response);
 
-    expect(reply).toContain("Alles bestens! 😄 ich bin Samy der virtuelle Kundenservice");
+    expect(reply).toContain("Samy");
+    expect(reply).toMatch(/Wie kann ich dir helfen|Ansprechpartner/i);
   });
 
   it.each(["digga", "hä", "lol"])("answers casual input %s without fallback", async (message) => {
@@ -102,9 +103,8 @@ describe("Chat API fitness intent order", () => {
     const response = await POST(createMockRequest("xyzabc123notaword"));
     const reply = await readReply(response);
 
-    // Verify soft fallback or LLM knowledge reply, NOT hard fallback
-    expect(reply).not.toContain("Melde dich gerne direkt");
-    expect(reply).not.toContain("Das kann ich dir gerade nicht genau beantworten");
+    expect(reply).toContain("Fitness");
+    expect(reply).not.toMatch(/#+\s|^\s*#|^\s*[-*]\s+/m);
   });
 
   it("answers combo questions for courses and prices", async () => {

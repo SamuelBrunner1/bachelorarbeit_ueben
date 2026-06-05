@@ -67,6 +67,15 @@ describe("Chat API reply quality", () => {
     expect(reply).toContain("ab 60€ pro Einheit");
   });
 
+  it("explains fitness goals in a coach-like way", async () => {
+    const res = await POST(createMockRequest("Ich möchte abnehmen"));
+    const reply = await readReply(res);
+
+    expect(reply.toLowerCase()).toContain("abnehmen");
+    expect(reply).toContain("Personal Training");
+    expect(reply).not.toMatch(/^\s*#/m);
+  });
+
   it("returns simple probetraining wording", async () => {
     const res = await POST(createMockRequest("Ich möchte ein Probetraining"));
     const reply = await readReply(res);
@@ -82,9 +91,19 @@ describe("Chat API reply quality", () => {
     const res = await POST(createMockRequest("Erkläre mir bitte die Raumfahrt"));
     const reply = await readReply(res);
 
-    expect(reply).toContain("Bin mir gerade nicht ganz sicher");
-    expect(reply).toContain("Preise, Kurse oder ein Probetraining");
+    expect(reply).toContain("Preise, Kurse, Sauna, Mitgliedschaften oder Probetraining");
     expect(reply).not.toContain("📞 +43 1234567");
     expect(reply).not.toContain("demo@email.com");
+    expect(reply).not.toMatch(/^\s*#/m);
+  });
+
+  it("does not leak raw knowledge markdown", async () => {
+    const res = await POST(createMockRequest("Was kostet Premium?"));
+    const reply = await readReply(res);
+
+    expect(reply).not.toContain("# ");
+    expect(reply).not.toContain("## ");
+    expect(reply).not.toContain("Frage:");
+    expect(reply).not.toContain("Antwort:");
   });
 });
