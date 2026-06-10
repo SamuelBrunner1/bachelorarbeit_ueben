@@ -164,7 +164,7 @@ async function getDirectReply(
   sessionId: string | undefined,
   state: ConversationState | undefined
 ): Promise<string | null> {
-  const analysis = analyzeMessage(message, state);
+  const analysis = analyzeMessage(message);
   const { flags } = analysis;
 
   // Follow-up resolution: short replies referring to last question/answer
@@ -460,7 +460,7 @@ export async function resolveStudioReply(options: {
     return directReply;
   }
 
-  const analysis = analyzeMessage(message, state);
+const analysis = analyzeMessage(message);
   // debug: log analysis for tricky queries during tests
   // eslint-disable-next-line no-console
   // console.log("[resolveStudioReply] analysis:", analysis);
