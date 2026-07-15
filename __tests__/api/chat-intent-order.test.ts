@@ -60,9 +60,7 @@ describe("Chat API intent priority", () => {
     const priceRequest = await POST(createMockRequest("wie sind eure Preise?", sessionId));
     const priceReply = await readReply(priceRequest);
 
-    expect(priceReply).toContain("Basic – 29€ pro Monat");
-    expect(priceReply).toContain("Premium – 49€ pro Monat");
-    expect(priceReply).toContain("kostenlos ein Probetraining machen");
+    expect(priceReply).toContain("Basic für 29€, Advanced für 39€ und Premium für 49€ pro Monat");
     expect(priceReply).not.toContain("wann passt es dir");
 
     const locationRequest = await POST(createMockRequest("wo ist das studio?", sessionId));

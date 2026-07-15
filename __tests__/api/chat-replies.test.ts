@@ -45,7 +45,7 @@ describe("Chat API reply quality", () => {
     const reply = await readReply(res);
 
     expect(reply).toBe(
-      "Ich bin Samy, der digitale Assistent deines Fitnessstudios und helfe dir gerne bei Fragen rund um Training, Mitgliedschaften und Probetrainings."
+      "Ich bin Samy, der digitale Assistent von Fitness Vienna."
     );
   });
 
@@ -53,27 +53,57 @@ describe("Chat API reply quality", () => {
     const res = await POST(createMockRequest("Welche Mitgliedschaften gibt es?"));
     const reply = await readReply(res);
 
-    expect(reply).toContain("Basic – 29€ pro Monat");
-    expect(reply).toContain("Advanced – 39€ pro Monat");
-    expect(reply).toContain("Premium – 49€ pro Monat");
-    expect(reply).toContain("kostenlos ein Probetraining machen");
+    expect(reply).toContain("Basic für 29€");
+    expect(reply).toContain("Advanced für 39€");
+    expect(reply).toContain("Premium für 49€ pro Monat");
   });
 
   it("returns concrete personal training pricing", async () => {
     const res = await POST(createMockRequest("Gibt es Personal Training?"));
     const reply = await readReply(res);
 
-    expect(reply).toContain("Ja, wir bieten auch Personal Training an.");
+    expect(reply).toContain("Ja, bei uns gibt es auch Personal Training.");
     expect(reply).toContain("ab 60€ pro Einheit");
   });
 
-  it("explains fitness goals in a coach-like way", async () => {
+  it("guides an abnehmen opener with one short question", async () => {
     const res = await POST(createMockRequest("Ich möchte abnehmen"));
     const reply = await readReply(res);
 
-    expect(reply.toLowerCase()).toContain("abnehmen");
-    expect(reply).toContain("Personal Training");
-    expect(reply).not.toMatch(/^\s*#/m);
+    expect(reply).toContain("Gutes Ziel");
+    expect(reply).toContain("Trainierst du schon regelmäßig");
+    expect(reply).not.toContain("Basic");
+    expect(reply).not.toContain("Premium");
+  });
+
+  it("guides a fitness studio opener before mentioning prices", async () => {
+    const res = await POST(createMockRequest("Ich suche ein Fitnessstudio."));
+    const reply = await readReply(res);
+
+    expect(reply).toContain("Schön, dass du dich umschaust");
+    expect(reply).toContain("Muskelaufbau, Abnehmen oder einfach fitter werden");
+    expect(reply).not.toContain("Basic");
+    expect(reply).not.toContain("Premium");
+  });
+
+  it("guides an anfänger opener with reassurance", async () => {
+    const res = await POST(createMockRequest("Ich bin Anfänger."));
+    const reply = await readReply(res);
+
+    expect(reply).toContain("Kein Problem");
+    expect(reply).toContain("Was möchtest du denn erreichen");
+    expect(reply).not.toContain("Basic");
+    expect(reply).not.toContain("Membership");
+  });
+
+  it("guides a muscle-building opener without selling", async () => {
+    const res = await POST(createMockRequest("Ich möchte Muskeln aufbauen."));
+    const reply = await readReply(res);
+
+    expect(reply).toContain("Klingt gut");
+    expect(reply).toContain("Trainierst du schon länger");
+    expect(reply).not.toContain("Premium");
+    expect(reply).not.toContain("Basic");
   });
 
   it("returns simple probetraining wording", async () => {
@@ -81,7 +111,7 @@ describe("Chat API reply quality", () => {
     const reply = await readReply(res);
 
     expect(reply).toContain("ohne Anmeldung für ein Probetraining vorbeikommen");
-    expect(reply).toContain("vorab noch etwas zum Training oder zu unseren Angeboten erklären");
+    expect(reply.length).toBeLessThan(140);
     expect(reply).not.toContain("wann passt es dir");
   });
 
@@ -91,7 +121,7 @@ describe("Chat API reply quality", () => {
     const res = await POST(createMockRequest("Erkläre mir bitte die Raumfahrt"));
     const reply = await readReply(res);
 
-    expect(reply).toContain("Preise, Kurse, Sauna, Mitgliedschaften oder Probetraining");
+    expect(reply).toContain("Preisen, Kursen, Sauna oder einem Probetraining");
     expect(reply).not.toContain("📞 +43 1234567");
     expect(reply).not.toContain("demo@email.com");
     expect(reply).not.toMatch(/^\s*#/m);

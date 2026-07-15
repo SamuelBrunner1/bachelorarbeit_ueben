@@ -1,17 +1,27 @@
 import { appendConversationTurn, getRecentConversationMessages, type ConversationMessage, type ConversationState, updateConversationState } from "@/lib/services/conversation.service";
 import { analyzeMessage } from "@/lib/services/intent.service";
-import { buildKnowledgeContext, getAvailableCapabilities, getKnowledgeSnippet, KNOWLEDGE_TOPIC } from "@/lib/services/knowledge.service";
+import { buildKnowledgeContext, getKnowledgeSnippet, KNOWLEDGE_TOPIC } from "@/lib/services/knowledge.service";
 import { generateFitnessReply, isAcceptableLlmReply } from "@/lib/services/llm.service";
 
+type ConversationPhase =
+  | "Greeting"
+  | "NeedDiscovery"
+  | "Recommendation"
+  | "EmotionalSupport"
+  | "PriceDiscussion"
+  | "ObjectionHandling"
+  | "Booking"
+  | "Closing";
+
 function formatReply(label: string, content: string): string {
-  return `${label}\n\n${content.trim()}`;
+  return `${label}\n${content.trim()}`;
 }
 
 function getSmalltalkReply(): string {
   const replies = [
-    "Mir geht's gut, danke! Ich bin Samy vom Kundenservice — wie kann ich dir helfen?",
-    "Alles bestens, und bei dir? Ich bin Samy, dein Ansprechpartner fürs Studio 😊",
-    "Danke der Nachfrage — ich bin bereit zu helfen! Was möchtest du wissen?",
+    "Mir geht's gut, danke! Ich bin Samy vom Studio.",
+    "Alles bestens, danke! Ich bin Samy von Fitness Vienna.",
+    "Danke der Nachfrage. Ich helfe dir gern weiter.",
   ];
 
   return replies[Math.floor(Math.random() * replies.length)];
@@ -19,10 +29,10 @@ function getSmalltalkReply(): string {
 
 function getCasualReply(): string {
   const replies = [
-    "Haha 😄 alles gut – was möchtest du wissen?",
-    "Alles entspannt 😄 Wobei kann ich dir helfen?",
-    "Alles gut 👍 Was interessiert dich – Training, Kurse oder Preise?",
-    "Haha 😄 alles klar – was möchtest du wissen?",
+    "Alles gut 😄",
+    "Passt 👍",
+    "Klar 😊",
+    "Alles entspannt.",
   ];
 
   return replies[Math.floor(Math.random() * replies.length)];
@@ -30,9 +40,9 @@ function getCasualReply(): string {
 
 function buildFallbackReply(): string {
   const replies = [
-    "Ich helfe dir am besten bei Preisen, Kursen, Sauna, Mitgliedschaften oder Probetraining.",
-    "Wenn es um unser Studio geht, kann ich dir direkt zu Preisen, Training oder Kursen antworten.",
-    "Ich bin für Fitness-Themen da: Mitgliedschaften, Kurse, Training, Sauna oder Probetraining.",
+    "Klar – ich helfe dir gern bei Preisen, Kursen, Sauna oder einem Probetraining.",
+    "Klar, ich antworte dir direkt zu allem rund ums Studio.",
+    "Ich helfe dir bei Fitness-Fragen, Mitgliedschaften, Kursen und Sauna.",
   ];
 
   return replies[Math.floor(Math.random() * replies.length)];
@@ -43,22 +53,110 @@ function buildOffTopicReply(): string {
 }
 
 function buildInterestReply(): string {
-  return "Sehr gerne! Du kannst jederzeit ohne Anmeldung für ein Probetraining vorbeikommen. Wenn du möchtest, kann ich dir vorab noch etwas zum Training oder zu unseren Angeboten erklären.";
+  return "Sehr gerne. Du kannst jederzeit ohne Anmeldung für ein Probetraining vorbeikommen.";
 }
 
 function buildCoachReply(message: string): string | null {
   const normalized = message.toLowerCase();
 
   if (/abnehmen|fett verlieren|weight loss/.test(normalized)) {
-    return "Wenn dein Ziel Abnehmen ist, ist eine Mischung aus regelmäßigem Training, etwas Cardio und einer passenden Mitgliedschaft sinnvoll. Für einen einfachen Start eignet sich Basic, und mit Personal Training bekommst du zusätzlich eine klare Begleitung.";
+    return "Beim Abnehmen helfen regelmäßiges Training, etwas Cardio und ein klarer Startplan. Dafür passt Basic gut. Wenn du mehr Struktur willst, ist Personal Training eine gute Option.";
   }
 
   if (/muskeln|muskelaufbau|stärker werden/.test(normalized)) {
-    return "Für Muskelaufbau brauchst du vor allem einen guten Trainingsplan, genug Kontinuität und die passenden Geräte. Dafür eignen sich unser Trainingsbereich und auf Wunsch auch Personal Training besonders gut.";
+    return "Für Muskelaufbau brauchst du vor allem einen guten Trainingsplan und die passenden Geräte. Dafür ist unser Trainingsbereich ideal. Auf Wunsch hilft dir auch ein Trainer dabei.";
   }
 
   if (/anfänger|einsteiger|beginner/.test(normalized)) {
-    return "Als Anfänger ist ein unkomplizierter Start am besten: kostenloses Probetraining, kurze Einweisung und dann schauen, welche Mitgliedschaft zu dir passt. Wenn du magst, kann ich dir die passende Option direkt nennen.";
+    return "Als Anfänger ist ein unkomplizierter Start am besten: Probetraining, kurze Einweisung und dann schauen, was zu dir passt.";
+  }
+
+  return null;
+}
+
+function isOpenConsultationStart(message: string): boolean {
+  return /ich suche ein fitnessstudio|ich möchte trainieren|ich möchte anfangen|ich bin anfänger|ich möchte abnehmen|ich möchte muskeln aufbauen/i.test(
+    message
+  );
+}
+
+function buildOpenConsultationReply(message: string): string {
+  const normalized = message.toLowerCase();
+
+  if (/ich suche ein fitnessstudio|ich möchte trainieren|ich möchte anfangen/.test(normalized)) {
+    return "Schön, dass du dich umschaust 😊 Was ist dir am wichtigsten: Muskelaufbau, Abnehmen oder einfach fitter werden?";
+  }
+
+  if (/ich bin anfänger/.test(normalized)) {
+    return "Kein Problem 😊 Gerade am Anfang ist ein einfacher Einstieg wichtig. Was möchtest du denn erreichen?";
+  }
+
+  if (/ich möchte abnehmen/.test(normalized)) {
+    return "Gutes Ziel 😊 Dabei helfen ein klarer Trainingsstart und ein Plan, der zu dir passt. Trainierst du schon regelmäßig?";
+  }
+
+  if (/ich möchte muskeln aufbauen/.test(normalized)) {
+    return "Klingt gut 💪 Dafür sind vor allem ein guter Trainingsplan und passende Geräte wichtig. Trainierst du schon länger?";
+  }
+
+  return "Klar 😊 Was ist dir wichtiger: Muskelaufbau, Abnehmen oder einfach fitter werden?";
+}
+
+function detectConversationPhase(message: string, state: ConversationState | undefined, flags: ReturnType<typeof analyzeMessage>["flags"]): ConversationPhase {
+  const normalized = message.toLowerCase();
+
+  if (/tschüss|tschuess|auf wiedersehen|bis dann|danke dir|perfekt danke/.test(normalized)) {
+    return "Closing";
+  }
+
+  if (/ich schäme mich|ich trau mich nicht|ich habe angst|ich bin unsicher|peinlich/.test(normalized)) {
+    return "EmotionalSupport";
+  }
+
+  if (/zu teuer|teuer|29\s*€\s*sind teuer|lohnt sich das|ist mir zu viel/.test(normalized) && state?.lastIntent === "price_info") {
+    return "ObjectionHandling";
+  }
+
+  if (state?.isBooking || flags.booking || flags.probetraining) {
+    return "Booking";
+  }
+
+  if (flags.greeting) {
+    return "Greeting";
+  }
+
+  if (isOpenConsultationStart(message)) {
+    return "NeedDiscovery";
+  }
+
+  if (flags.price || flags.cheap || /preis|kosten|kostet|mitgliedschaft|premium|basic/.test(normalized)) {
+    return "PriceDiscussion";
+  }
+
+  if (flags.course || flags.sauna || flags.equipment || flags.trainers || flags.location) {
+    return "Recommendation";
+  }
+
+  return "NeedDiscovery";
+}
+
+function buildPhaseReply(phase: ConversationPhase, message: string): string | null {
+  const normalized = message.toLowerCase();
+
+  if (phase === "EmotionalSupport") {
+    return "Danke, dass du das so offen sagst. Das ist völlig okay 😊 Wir können ganz entspannt starten. Was würde dir den Einstieg leichter machen?";
+  }
+
+  if (phase === "ObjectionHandling") {
+    return "Verstehe ich gut. Wichtig ist, dass es sich für dich lohnt. Wenn du magst, schauen wir kurz, was du wirklich nutzen möchtest.";
+  }
+
+  if (phase === "Closing") {
+    return "Sehr gern. Wenn du später noch Fragen hast, bin ich hier für dich 👍";
+  }
+
+  if (phase === "NeedDiscovery" && /ich suche ein fitnessstudio|ich möchte trainieren|ich möchte anfangen/.test(normalized)) {
+    return "Schön, dass du dich umschaust 😊 Was ist dir am wichtigsten: Muskelaufbau, Abnehmen oder einfach fitter werden?";
   }
 
   return null;
@@ -69,7 +167,7 @@ function buildStudioInfoReply(label: string, content: string): string {
 }
 
 function buildBookingSummary(selectedProperty: string, selectedTime: string): string {
-  return `Perfekt, hier die Zusammenfassung:\n\n• Angebot: ${selectedProperty}\n• Termin: ${selectedTime}\n\nIch habe den Termin für dich vorgemerkt. Eine Bestätigungsmail folgt in Kürze.`;
+  return `Perfekt.\nAngebot: ${selectedProperty}\nTermin: ${selectedTime}\n\nIch habe den Termin vorgemerkt.`;
 }
 
 function appendReply(sessionId: string | undefined, userMessage: string, reply: string, patch?: Partial<ConversationState>) {
@@ -130,7 +228,7 @@ function resolveBookingFlow(message: string, state?: ConversationState) {
 
   if (offer && !time) {
     return {
-      reply: `Perfekt. Für das Angebot "${offer}" – wann passt es dir?`,
+      reply: `Klar. Für ${offer} – wann passt es dir?`,
       nextState: {
         isBooking: true,
         selectedProperty: offer,
@@ -141,7 +239,7 @@ function resolveBookingFlow(message: string, state?: ConversationState) {
 
   if (!offer && time) {
     return {
-      reply: "Für welches Angebot möchtest du den Termin eintragen?",
+      reply: "Für welches Angebot soll ich den Termin vormerken?",
       nextState: {
         isBooking: true,
         selectedTime: time,
@@ -151,7 +249,7 @@ function resolveBookingFlow(message: string, state?: ConversationState) {
   }
 
   return {
-    reply: "Für welchen Termin möchtest du dich vormerken?",
+    reply: "Für welchen Termin soll ich dich vormerken?",
     nextState: {
       isBooking: true,
       lastIntent: "booking_started",
@@ -166,6 +264,13 @@ async function getDirectReply(
 ): Promise<string | null> {
   const analysis = analyzeMessage(message);
   const { flags } = analysis;
+  const phase = detectConversationPhase(message, state, flags);
+
+  const phaseReply = buildPhaseReply(phase, message);
+  if (phaseReply) {
+    appendReply(sessionId, message, phaseReply, { conversationPhase: phase, lastIntent: phase.toLowerCase() });
+    return phaseReply;
+  }
 
   // Follow-up resolution: short replies referring to last question/answer
   if (
@@ -179,38 +284,38 @@ async function getDirectReply(
     if (flags.followUpYesNo) {
       // Common known topics
       if (/yoga/i.test(String(lastTopic)) || /yoga/i.test(String(lastEntity))) {
-        const reply = "Ja 😊, wir bieten Yoga-Kurse an.";
+        const reply = "Ja 😊, Yoga-Kurse gibt es bei uns.";
         appendReply(sessionId, message, reply, { lastIntent: "courses_info", lastTopic: "YOGA", lastEntity: "Yoga" });
         return reply;
       }
 
       if (/sauna/i.test(String(lastTopic)) || /sauna/i.test(String(lastEntity))) {
-        const reply = "Ja, Sauna ist in manchen Tarifen enthalten. Bei Premium ist die Sauna inklusive.";
+        const reply = "Ja, Sauna ist je nach Tarif dabei. Bei Premium ist sie inklusive.";
         appendReply(sessionId, message, reply, { lastIntent: "sauna_info", lastTopic: "SAUNA", lastEntity: "Sauna" });
         return reply;
       }
 
       if (state?.lastIntent === "price_info" && /premium/i.test(String(lastEntity))) {
-        const reply = "Ja, Sauna ist im Premium-Tarif enthalten.";
+        const reply = "Ja, im Premium-Tarif ist Sauna enthalten.";
         appendReply(sessionId, message, reply, { lastIntent: "price_info", lastTopic: "MEMBERSHIP", lastEntity: state?.lastEntity });
         return reply;
       }
 
       if (state?.lastIntent === "courses_info") {
-        const reply = "Ja, genau — das bieten wir an.";
+        const reply = "Ja, genau.";
         appendReply(sessionId, message, reply, { lastIntent: "courses_info" });
         return reply;
       }
 
       // fallback to short affirmative
       if (flags.yes) {
-        const reply = "Ja, das stimmt 😊";
+        const reply = "Ja, genau 😊";
         appendReply(sessionId, message, reply);
         return reply;
       }
 
       if (normalizeFollowUpNegation(message)) {
-        const reply = "Nein — so ist das nicht, lass mich kurz erklären:";
+        const reply = "Nein, so ist es nicht.";
         appendReply(sessionId, message, reply);
         return reply;
       }
@@ -219,7 +324,7 @@ async function getDirectReply(
     // Price follow-ups like "Mit Sauna?"
     if (flags.followUpPrice) {
       if (state?.lastIntent === "price_info" && /premium/i.test(String(lastEntity))) {
-        const reply = "Ja, der Premium-Tarif enthält Sauna.";
+        const reply = "Ja, Premium enthält Sauna.";
         appendReply(sessionId, message, reply, { lastIntent: "price_info", lastTopic: "MEMBERSHIP", lastEntity: state?.lastEntity });
         return reply;
       }
@@ -235,75 +340,81 @@ async function getDirectReply(
         appendReply(sessionId, message, llmReply);
         return llmReply;
       }
-    } catch (e) {
+    } catch {
       // ignore and fallthrough
     }
   }
 
   if (flags.identity) {
-    const reply = "Ich bin Samy, der digitale Assistent deines Fitnessstudios und helfe dir gerne bei Fragen rund um Training, Mitgliedschaften und Probetrainings.";
-    appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "identity" });
+    const reply = "Ich bin Samy, der digitale Assistent von Fitness Vienna.";
+    appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "identity", conversationPhase: "Greeting" });
     return reply;
   }
 
   if (flags.capability) {
-    const reply = `Ich helfe dir gerne bei allem rund ums Fitnessstudio – zum Beispiel bei ${getAvailableCapabilities().join(", ")}.`;
-    appendReply(sessionId, message, reply);
+    const reply = "Klar – ich helfe dir bei Preisen, Kursen, Sauna, Mitgliedschaften oder Probetraining.";
+    appendReply(sessionId, message, reply, { conversationPhase: "Recommendation" });
     return reply;
   }
 
   if (flags.greeting) {
-    const reply = "Hallo! Wie kann ich dir bei Fitness, Preisen oder einem Probetraining helfen?";
-    appendReply(sessionId, message, reply);
+    const reply = "Hallo 😊";
+    appendReply(sessionId, message, reply, { conversationPhase: "Greeting" });
+    return reply;
+  }
+
+  if (isOpenConsultationStart(message)) {
+    const reply = buildOpenConsultationReply(message);
+    appendReply(sessionId, message, reply, { lastIntent: "coach_advice", conversationPhase: "NeedDiscovery" });
     return reply;
   }
 
   if (flags.course && !flags.hasCoursePriceCombo && !flags.hasYogaWhenCombo) {
-    const reply = formatReply("Unsere Kurse im Überblick:", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.COURSES));
+    const reply = formatReply("Klar – hier sind unsere Kurse:", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.COURSES));
     const entity = /yoga/i.test(message) ? "Yoga" : undefined;
     appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "courses_info", lastTopic: entity ? "YOGA" : "COURSES", lastEntity: entity });
     return reply;
   }
 
   if (flags.hasCoursePriceCombo) {
-    const reply = "Wir bieten Kurse wie Yoga, HIIT und Spinning an. Die Mitgliedschaften starten ab 29€ pro Monat.";
+    const reply = "Bei uns gibt es Kurse wie Yoga, HIIT und Spinning. Die Mitgliedschaften starten ab 29€ pro Monat.";
     appendReply(sessionId, message, reply, { lastIntent: "courses_info", lastTopic: "COURSES" });
     return reply;
   }
 
   if (flags.hasPriceTimeCombo) {
-    const reply = "Unsere Mitgliedschaften starten ab 29€ pro Monat. Du kannst jederzeit ohne Anmeldung vorbeikommen und direkt starten 😊";
+    const reply = "Bei uns starten die Mitgliedschaften ab 29€ pro Monat. Du kannst jederzeit ohne Anmeldung vorbeikommen.";
     appendReply(sessionId, message, reply);
     return reply;
   }
 
   if (flags.hasYogaWhenCombo) {
-    const reply = "Wir bieten Yoga-Kurse an. Wir haben täglich von 06:00 bis 22:00 Uhr geöffnet.";
+    const reply = "Ja 😊, bei uns gibt es Yoga-Kurse. Täglich von 06:00 bis 22:00 Uhr.";
     appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "courses_info", lastTopic: "YOGA", lastEntity: "Yoga" });
     return reply;
   }
 
   if (flags.openingHours && !flags.hasYogaWhenCombo) {
-    const reply = "Wir haben Montag bis Sonntag von 06:00 bis 22:00 Uhr geöffnet. Am Wochenende also ganz normal 😊";
+    const reply = "Ja 😊, bei uns täglich von 06:00 bis 22:00 Uhr.";
     appendReply(sessionId, message, reply);
     return reply;
   }
 
   if (analysis.flags.process) {
-    const reply = "Du kannst einfach vorbeikommen, dich kurz anmelden und direkt starten. Ein Trainer hilft dir am Anfang gerne.";
+    const reply = "Klar, du kannst einfach vorbeikommen und direkt starten. Am Anfang hilft dir ein Trainer gern.";
     appendReply(sessionId, message, reply);
     return reply;
   }
 
   if (isPersonalTrainingQuestion(message)) {
-    const reply = formatReply("Ja, wir bieten auch Personal Training an.", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.TRAINERS));
+    const reply = formatReply("Ja, bei uns gibt es auch Personal Training.", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.TRAINERS));
     appendReply(sessionId, message, reply);
     return reply;
   }
 
   if (isWalkInQuestion(message)) {
     const reply = buildInterestReply();
-    appendReply(sessionId, message, reply, { isLead: true, isBooking: true, lastIntent: "walk_in" });
+    appendReply(sessionId, message, reply, { isLead: true, isBooking: true, lastIntent: "walk_in", conversationPhase: "Booking" });
     return reply;
   }
 
@@ -320,7 +431,7 @@ async function getDirectReply(
   }
 
   if (flags.looseTime) {
-    const reply = "Du kannst jederzeit während unserer Öffnungszeiten vorbeikommen 😊 Wir haben täglich von 06:00 bis 22:00 Uhr geöffnet.";
+    const reply = "Klar, du kannst jederzeit während der Öffnungszeiten vorbeikommen. Täglich von 06:00 bis 22:00 Uhr.";
     appendReply(sessionId, message, reply);
     return reply;
   }
@@ -332,7 +443,7 @@ async function getDirectReply(
   }
 
   if (flags.cheap) {
-    const reply = "Unsere günstigste Mitgliedschaft ist:\n\n• Basic – 29€ pro Monat  \n\nDu kannst auch jederzeit kostenlos ein Probetraining machen und dir alles anschauen.";
+    const reply = "Basic liegt bei 29€ pro Monat. Ein Probetraining ist jederzeit kostenlos möglich.";
     appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "price_info", lastTopic: "MEMBERSHIP", lastEntity: "Basic" });
     return reply;
   }
@@ -345,79 +456,83 @@ async function getDirectReply(
 
   if (flags.probetraining) {
     const reply = buildInterestReply();
-    appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "probetraining_info" });
+    appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "probetraining_info", conversationPhase: "Booking" });
     return reply;
   }
 
   if (flags.interest && !state?.isBooking) {
     const reply = buildInterestReply();
-    appendReply(sessionId, message, reply, { isLead: true, isBooking: true, lastIntent: "interest" });
+    appendReply(sessionId, message, reply, { isLead: true, isBooking: true, lastIntent: "interest", conversationPhase: "NeedDiscovery" });
     return reply;
   }
 
   if (analysis.flags.info) {
     if (/mitgliedschaft|mitgliedschaften/i.test(message)) {
-      const reply = buildStudioInfoReply("Hier sind unsere Mitgliedschaften:", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.MEMBERSHIP));
-      appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "price_info", lastTopic: "MEMBERSHIP" });
+      const reply = "Klar – bei uns gibt es Basic für 29€, Advanced für 39€ und Premium für 49€ pro Monat.";
+      appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "price_info", lastTopic: "MEMBERSHIP", conversationPhase: "PriceDiscussion" });
       return reply;
     }
 
     if (/preise|kosten|kostet|wie teuer|was kostet/i.test(message)) {
-      const reply = formatReply("Hier sind unsere Mitgliedschaften:", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.PRICES));
+      const reply = /premium/i.test(message)
+        ? "Premium liegt bei 49€ pro Monat."
+        : /basic/i.test(message)
+          ? "Basic liegt bei 29€ pro Monat."
+          : "Klar – bei uns gibt es Basic für 29€, Advanced für 39€ und Premium für 49€ pro Monat.";
       const ent = /premium/i.test(message) ? "Premium" : /basic/i.test(message) ? "Basic" : undefined;
-      appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "price_info", lastTopic: "MEMBERSHIP", lastEntity: ent });
+      appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "price_info", lastTopic: "MEMBERSHIP", lastEntity: ent, conversationPhase: "PriceDiscussion" });
       return reply;
     }
 
     if (/öffnungszeiten|oeffnungszeiten|wann habt ihr offen/i.test(message)) {
-      const reply = await getKnowledgeSnippet(KNOWLEDGE_TOPIC.FAQ);
+      const reply = formatReply("Gerne.", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.FAQ));
       appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "info_question" });
       return reply;
     }
 
     if (/kurse|yoga|hiit|spinning|pilates/i.test(message)) {
-      const reply = formatReply("Unsere Kurse im Überblick:", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.COURSES));
+      const reply = formatReply("Gerne.", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.COURSES));
       appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "info_question" });
       return reply;
     }
 
     if (/standort|wo/i.test(message)) {
-      const reply = buildStudioInfoReply("Standort:", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.LOCATION));
+      const reply = buildStudioInfoReply("Gerne.", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.LOCATION));
       appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "info_question" });
       return reply;
     }
 
     if (/parkplatz|parken/i.test(message)) {
-      const reply = buildStudioInfoReply("Parken:", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.PARKING));
+      const reply = buildStudioInfoReply("Gerne.", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.PARKING));
       appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "info_question" });
       return reply;
     }
 
     if (/duschen|dusche/i.test(message)) {
-      const reply = buildStudioInfoReply("Duschen:", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.SHOWERS));
+      const reply = buildStudioInfoReply("Gerne.", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.SHOWERS));
       appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "info_question" });
       return reply;
     }
 
     if (/schließfach|schliessfach|locker/i.test(message)) {
-      const reply = buildStudioInfoReply("Schließfächer:", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.LOCKERS));
+      const reply = buildStudioInfoReply("Gerne.", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.LOCKERS));
       appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "info_question" });
       return reply;
     }
 
     if (/geräte|equipment|maschinen|freihantel|cardio/i.test(message)) {
-      const reply = buildStudioInfoReply("Geräte und Bereiche:", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.EQUIPMENT));
+      const reply = buildStudioInfoReply("Gerne.", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.EQUIPMENT));
       appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "info_question" });
       return reply;
     }
 
     if (/personal training/i.test(message)) {
-      const reply = buildStudioInfoReply("Ja, wir bieten auch Personal Training an.", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.PERSONAL_TRAINING));
+      const reply = buildStudioInfoReply("Ja, bei uns gibt es auch Personal Training.", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.PERSONAL_TRAINING));
       appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "info_question" });
       return reply;
     }
 
-    const reply = "Gerne helfe ich dir mit Informationen zu Öffnungszeiten, Preisen, Kursen oder dem Standort weiter.";
+    const reply = "Gerne – ich helfe dir bei Öffnungszeiten, Preisen, Kursen oder dem Standort.";
     appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "info_question" });
     return reply;
   }
@@ -428,19 +543,19 @@ async function getDirectReply(
 
   if (flags.booking || (state?.isBooking && flags.booking) || (state?.isBooking && flags.yes)) {
     const bookingState = resolveBookingFlow(message, state);
-    appendReply(sessionId, message, bookingState.reply, bookingState.nextState);
+    appendReply(sessionId, message, bookingState.reply, { ...bookingState.nextState, conversationPhase: "Booking" });
     return bookingState.reply;
   }
 
   if (/günstigste|billigste|am günstigsten|am billigsten/.test(message.toLowerCase())) {
-    const reply = "Unsere günstigste Mitgliedschaft ist Basic für 29€ pro Monat. Wenn du willst, erkläre ich dir auch den Unterschied zu Advanced und Premium.";
-    appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "price_lowest" });
+    const reply = "Basic liegt bei 29€ pro Monat.";
+    appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "price_lowest", conversationPhase: "PriceDiscussion" });
     return reply;
   }
 
   if (/teuerste|am teuersten|höchster preis|höchsten preis/.test(message.toLowerCase())) {
-    const reply = "Unsere Premium-Mitgliedschaft liegt bei 49€ pro Monat und enthält Kurse, Sauna und flexible Check-ins.";
-    appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "price_highest" });
+    const reply = "Premium liegt bei 49€ pro Monat und enthält Kurse sowie Sauna.";
+    appendReply(sessionId, message, reply, { isBooking: false, lastIntent: "price_highest", conversationPhase: "PriceDiscussion" });
     return reply;
   }
 
@@ -461,16 +576,13 @@ export async function resolveStudioReply(options: {
   }
 
 const analysis = analyzeMessage(message);
-  // debug: log analysis for tricky queries during tests
-  // eslint-disable-next-line no-console
-  // console.log("[resolveStudioReply] analysis:", analysis);
   const knowledgeContext = await buildKnowledgeContext(message, analysis, recentMessages);
 
   // Safety fallback: if user explicitly asks about prices/memberships, return prices snippet
   if (/preise|kosten|kostet|wie teuer|premium|basic|mitgliedschaft/i.test(message)) {
-    const reply = formatReply("Hier sind unsere Mitgliedschaften:", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.PRICES));
+    const reply = formatReply("Gerne.", await getKnowledgeSnippet(KNOWLEDGE_TOPIC.PRICES));
     if (sessionId) {
-      updateConversationState(sessionId, { lastIntent: "price_info", lastTopic: "MEMBERSHIP" });
+      updateConversationState(sessionId, { lastIntent: "price_info", lastTopic: "MEMBERSHIP", conversationPhase: "PriceDiscussion" });
       appendConversationTurn(sessionId, message, reply);
     }
     return reply;
@@ -478,7 +590,7 @@ const analysis = analyzeMessage(message);
 
   if (!analysis.flags.fitnessTopic && !knowledgeContext) {
     const reply = buildOffTopicReply();
-    appendReply(sessionId, message, reply);
+    appendReply(sessionId, message, reply, { conversationPhase: "NeedDiscovery" });
     return reply;
   }
 
@@ -486,7 +598,7 @@ const analysis = analyzeMessage(message);
   const reply = isAcceptableLlmReply(llmReply) ? llmReply : buildFallbackReply();
 
   if (sessionId) {
-    updateConversationState(sessionId, { lastIntent: "knowledge_reply" });
+    updateConversationState(sessionId, { lastIntent: "knowledge_reply", conversationPhase: "Recommendation" });
     appendConversationTurn(sessionId, message, reply);
   }
 

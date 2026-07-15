@@ -60,23 +60,22 @@ describe("Chat API fitness intent order", () => {
     const reply = await readReply(response);
 
     expect(reply).toContain("06:00 bis 22:00 Uhr");
-    expect(reply).toContain("Wochenende");
+    expect(reply).toContain("Ja 😊");
   });
 
   it("answers process questions", async () => {
     const response = await POST(createMockRequest("wie läuft das ab"));
     const reply = await readReply(response);
 
-    expect(reply).toContain("Du kannst einfach vorbeikommen");
-    expect(reply).toContain("Trainer hilft dir");
+    expect(reply).toContain("du kannst einfach vorbeikommen");
+    expect(reply).toContain("Trainer gern");
   });
 
   it("keeps short smalltalk as smalltalk", async () => {
     const response = await POST(createMockRequest("was geht"));
     const reply = await readReply(response);
 
-    expect(reply).toContain("Samy");
-    expect(reply).toMatch(/Wie kann ich dir helfen|Ansprechpartner/i);
+    expect(reply).toMatch(/Mir geht's gut|Alles bestens|Danke der Nachfrage/i);
   });
 
   it.each(["digga", "hä", "lol"])("answers casual input %s without fallback", async (message) => {
@@ -85,7 +84,7 @@ describe("Chat API fitness intent order", () => {
     const response = await POST(createMockRequest(message));
     const reply = await readReply(response);
 
-    expect(reply).toContain("Haha 😄 alles gut – was möchtest du wissen?");
+    expect(reply).toContain("Alles gut 😄");
   });
 
   it.each(["bro", "bruder", "yo", "ey"])("answers extended casual input %s friendly", async (message) => {
@@ -94,7 +93,7 @@ describe("Chat API fitness intent order", () => {
     const response = await POST(createMockRequest(message));
     const reply = await readReply(response);
 
-    expect(reply).toContain("alles gut – was möchtest du wissen?");
+    expect(reply).toContain("Alles gut 😄");
   });
 
   it("uses soft fallback reply and avoids hard fallback text", async () => {
@@ -151,7 +150,7 @@ describe("Chat API fitness intent order", () => {
     const response = await POST(createMockRequest("was kostet das und kann ich morgen kommen"));
     const reply = await readReply(response);
 
-    expect(reply).toContain("starten ab 29€ pro Monat");
+    expect(reply).toContain("29€ pro Monat");
     expect(reply).toContain("ohne Anmeldung vorbeikommen");
   });
 });

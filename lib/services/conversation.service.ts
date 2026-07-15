@@ -6,6 +6,7 @@ export type ConversationMessage = {
 export type ConversationState = {
   isLead: boolean;
   isBooking: boolean;
+  conversationPhase?: string;
   selectedProperty?: string;
   selectedTime?: string;
   selectedLocation?: string;
