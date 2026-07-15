@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { updateConversationState } from "../../lib/services/conversation.service";
 import { POST } from "../../app/api/chat/route";
+import { getCapturedFoundryRequests, mockFoundryResponses } from "../helpers/foundry-mock";
 
 function createMockRequest(message: string, sessionId = "followup-test-session"): NextRequest {
   const url = new URL("http://localhost:3000/api/chat");
@@ -35,8 +36,12 @@ describe("Chat follow-up and context handling", () => {
     delete process.env.AZURE_OPENAI_API_KEY;
     delete process.env.AZURE_OPENAI_DEPLOYMENT;
     delete process.env.AZURE_OPENAI_API_VERSION;
+    process.env.FOUNDRY_PROJECT_ENDPOINT = "https://test.foundry.azure.com";
+    process.env.FOUNDRY_API_KEY = "test-foundry-key";
+    process.env.FOUNDRY_AGENT_NAME = "chatbot-agent";
     process.env.SESSION_COOKIE_NAME = "session_id";
     process.env.IMMOBOT_SESSION_SECRET = "test-secret-key-followups";
+    mockFoundryResponses();
   });
 
   it("resolves 'Ja oder nein?' to previous topic (Yoga)", async () => {
@@ -50,6 +55,9 @@ describe("Chat follow-up and context handling", () => {
     const reply2 = await readReply(res2);
     expect(reply2.toLowerCase()).toContain("ja");
     expect(reply2.toLowerCase()).toContain("yoga");
+
+    const captured = getCapturedFoundryRequests();
+    expect(captured[1]?.body.input?.some((entry) => entry.role === "assistant" && entry.content.includes("Yoga"))).toBe(true);
   });
 
   it("resolves 'Mit Sauna?' after a price question about Premium", async () => {

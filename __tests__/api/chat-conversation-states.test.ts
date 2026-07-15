@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "../../app/api/chat/route";
+import { getCapturedFoundryRequests, mockFoundryResponses } from "../helpers/foundry-mock";
 
 function createMockRequest(message: string, sessionId = "conversation-state-session"): NextRequest {
   const url = new URL("http://localhost:3000/api/chat");
@@ -35,8 +36,12 @@ describe("Chat API conversation states", () => {
     delete process.env.AZURE_OPENAI_DEPLOYMENT;
     delete process.env.AZURE_OPENAI_API_VERSION;
     delete process.env.IMMOBOT_API_KEY;
+    process.env.FOUNDRY_PROJECT_ENDPOINT = "https://test.foundry.azure.com";
+    process.env.FOUNDRY_API_KEY = "test-foundry-key";
+    process.env.FOUNDRY_AGENT_NAME = "chatbot-agent";
     process.env.SESSION_COOKIE_NAME = "session_id";
     process.env.IMMOBOT_SESSION_SECRET = "test-secret-key-for-conversation-states";
+    mockFoundryResponses();
     vi.restoreAllMocks();
   });
 
@@ -47,6 +52,9 @@ describe("Chat API conversation states", () => {
     expect(reply).toContain("Was ist dir am wichtigsten");
     expect(reply).not.toContain("Basic");
     expect(reply).not.toContain("Premium");
+
+    const captured = getCapturedFoundryRequests();
+    expect(captured[0]?.body.input?.at(-1)?.content).toBe("Ich suche ein Fitnessstudio.");
   });
 
   it("uses EmotionalSupport before prices for emotional messages", async () => {
