@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:agent": "tsx scripts/run-agent-tests.ts",
     "test:watch": "vitest watch",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage"
@@ -29,6 +30,7 @@
     "eslint-config-next": "^16.2.9",
     "happy-dom": "^20.9.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.1",
     "typescript": "^5",
     "vitest": "^4.1.6"
   }

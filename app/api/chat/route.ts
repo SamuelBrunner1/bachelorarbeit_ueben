@@ -134,14 +134,36 @@ export async function POST(req: NextRequest) {
 
   const sessionId = session?.sid;
   const currentState = sessionId ? getConversationState(sessionId) : undefined;
-  const reply = await resolveStudioReply({
-    message: sanitizedMessage,
-    sessionId,
-    state: currentState,
-    recentMessages: getRecentConversationMessages(sessionId),
-  });
+  const requestStart = Date.now();
 
-  return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  try {
+    const reply = await resolveStudioReply({
+      message: sanitizedMessage,
+      sessionId,
+      state: currentState,
+      recentMessages: getRecentConversationMessages(sessionId),
+      requestId,
+    });
+
+    await logSecurityEvent("info", "agent_request_completed", {
+      requestId,
+      ip: maskIp(ip),
+      sessionId: sessionId ? sessionId.slice(0, 8) : "none",
+      durationMs: Date.now() - requestStart,
+    });
+
+    return NextResponse.json({ reply }, { headers: buildSecurityHeaders() });
+  } catch (error) {
+    await logSecurityEvent("error", "agent_request_failed", {
+      requestId,
+      ip: maskIp(ip),
+      sessionId: sessionId ? sessionId.slice(0, 8) : "none",
+      durationMs: Date.now() - requestStart,
+      error: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : String(error),
+    });
+
+    throw error;
+  }
 }
 
 export async function OPTIONS() {
